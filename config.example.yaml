@@ -1,0 +1,56 @@
+# Life Agent 配置示例：复制为 config.yaml 后按需修改（config.yaml 已 gitignore）
+listen: 127.0.0.1:7788      # 只监听本机；跨设备访问建议走 Tailscale
+data_dir: data              # SQLite 数据库位置
+
+triage:
+  fresh_window: 24h         # 早于此时间的历史消息（首次回填）不计未读/需要看
+  self_names: ["你的微信昵称", "你的QQ群名片"]   # 文本里 "@名字" 视为 @我（微信/QQ 文本兜底）
+  vip: []                   # 这些发送者的消息一律进「需要看」
+  mute_patterns: []         # 标题匹配的会话永不进「需要看」（仍计未读）
+  mail_needs_attention: false
+  alert:                    # 命中的会话进入「线上告警」栏，并从其它栏移除
+    conversation_patterns: ["告警", "报警", "alarm", "alert", "监控", "oncall"]
+    sender_patterns: []
+    text_patterns: ['\[FIRING\]', '\bP[01]\b', "告警"]   # 仅对机器人消息生效
+
+feishu:
+  enabled: true
+  cli_path: lark-cli        # 用你本人身份（user）同步，需先 lark-cli auth login
+  poll_interval: 30s
+  chat_limit: 100           # 跟踪最活跃的 N 个会话
+  hot_chats: 10             # 每轮必拉的头部会话数
+  sweep_every: 10           # 每 N 轮全量扫一遍
+  backfill: 72h             # 首次同步回填时长
+  send: false               # 打开后可在平台内以你本人身份回复
+
+wechat:
+  enabled: false
+  db_dir: /path/to/decrypted/db_storage   # 解密后的微信 4.x db_storage 镜像目录（只读）
+  self_wxid: wxid_xxxxxxxx
+  poll_interval: 10s
+  backfill: 72h
+  include_official_accounts: false
+
+qq:
+  enabled: false
+  ws_url: ws://127.0.0.1:3001   # NapCat 的 OneBot v11 正向 WebSocket
+  access_token: ""
+  send: false
+
+mail:                         # 任意多个 IMAP 邮箱，每个是独立的 source（mail:<id>）
+  - id: gmail
+    name: 个人 Gmail
+    host: imap.gmail.com
+    username: you@gmail.com
+    password_cmd: security find-generic-password -w -s life-agent-gmail   # macOS 钥匙串，推荐
+  - id: qqmail
+    name: QQ 邮箱
+    host: imap.qq.com
+    username: 123456@qq.com
+    password_env: QQMAIL_AUTH_CODE   # QQ/163 邮箱用“授权码”
+  # - id: work
+  #   name: 工作邮箱
+  #   host: imap.exmail.qq.com
+  #   username: me@company.com
+  #   password_cmd: security find-generic-password -w -s life-agent-work
+  #   folders: [INBOX]
