@@ -1,6 +1,6 @@
 import { Check, ExternalLink, FileText, Image as ImageIcon, Link2, Mic, SendHorizontal, Video } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, newOpKey } from "../api";
 import { PLATFORM } from "../platform";
 import { clockTime, dayLabel, sameDay } from "../lib/time";
 import type { Conversation, Message } from "../types";
@@ -12,7 +12,7 @@ const TYPE_ICON: Partial<Record<Message["type"], typeof FileText>> = {
 export function Thread({ conv, version, onDone, onSent }: {
   conv: Conversation;
   version: number;
-  onDone: (c: Conversation) => void;
+  onDone: (c: Conversation, seenAt?: string) => void;
   onSent: () => void;
 }) {
   const [msgs, setMsgs] = useState<Message[]>([]);
@@ -54,7 +54,7 @@ export function Thread({ conv, version, onDone, onSent }: {
         </div>
         <div className="thread-actions">
           {conv.needs_attention && (
-            <button className="btn btn-ghost" onClick={() => onDone(conv)} title="从“需要看”中移除">
+            <button className="btn btn-ghost" onClick={() => onDone(conv, msgs.length ? msgs[msgs.length - 1].sent_at : conv.last_message_at)} title="从“需要看”中移除">
               <Check size={14} /> 标记已处理
             </button>
           )}
@@ -106,19 +106,29 @@ function Composer({ conv, onSent }: { conv: Conversation; onSent: () => void }) 
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  useEffect(() => { setText(""); setErr(""); }, [conv.id]);
+  // One idempotency key per message the user means to send. It survives a
+  // network-level retry (no response → maybe sent), so the hub dedupes it.
+  const opKey = useRef<{ key: string; text: string } | null>(null);
+  useEffect(() => { setText(""); setErr(""); opKey.current = null; }, [conv.id]);
 
   const disabled = !conv.can_send;
   const submit = async () => {
     const t = text.trim();
     if (!t || busy || disabled) return;
     setBusy(true); setErr("");
+    if (!opKey.current || opKey.current.text !== t) opKey.current = { key: newOpKey(), text: t };
     try {
-      await api.send(conv.id, t);
+      await api.send(conv.id, t, opKey.current.key);
       setText("");
+      opKey.current = null;
       onSent();
     } catch (e) {
-      setErr(e instanceof ApiError && e.status === 501 ? "该渠道暂不支持发送" : `发送失败：${(e as Error).message}`);
+      // The hub answered: the outcome is final for this key, so a manual
+      // retry gets a new one. Network failures keep the key (may have sent).
+      if (e instanceof ApiError && e.status !== 409) opKey.current = null;
+      setErr(e instanceof ApiError && e.status === 501 ? "该渠道暂不支持发送"
+        : e instanceof ApiError && e.status === 409 ? "这条消息还在发送中，请稍候"
+        : `发送失败：${(e as Error).message}`);
     } finally {
       setBusy(false);
     }

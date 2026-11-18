@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go driver, no cgo
@@ -35,9 +36,11 @@ CREATE TABLE IF NOT EXISTS conversations (
   title_alert INTEGER NOT NULL DEFAULT 0,
   alert_hits INTEGER NOT NULL DEFAULT 0,
   msg_count INTEGER NOT NULL DEFAULT 0,
-  last_read_at INTEGER NOT NULL DEFAULT 0
+  last_read_at INTEGER NOT NULL DEFAULT 0,
+  change_seq INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS conv_last ON conversations(last_message_at DESC);
+CREATE INDEX IF NOT EXISTS conv_seq ON conversations(change_seq);
 
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -70,6 +73,13 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
 END;
 CREATE INDEX IF NOT EXISTS msg_unnamed ON messages(source, sender_id) WHERE sender_name = '';
 
+CREATE TABLE IF NOT EXISTS client_ops (
+  key TEXT PRIMARY KEY,
+  status INTEGER NOT NULL DEFAULT 0,
+  body TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cursors (
   source TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -80,11 +90,19 @@ CREATE TABLE IF NOT EXISTS cursors (
 
 // Store implements connector.Sink plus the read queries used by the API.
 type Store struct {
-	db       *sql.DB
-	tri      *triage.Engine
-	wmu      sync.Mutex // serialize writers; SQLite has one writer anyway
+	db  *sql.DB
+	tri *triage.Engine
+	wmu sync.Mutex // serialize writers; SQLite has one writer anyway
+	// seq is the hub-wide change sequence. Every visible change to a
+	// conversation stamps it with the next value, so clients can ask for
+	// "everything since N" after a disconnect.
+	seq      atomic.Int64
 	OnChange func(source string)
 }
+
+// ErrStale is returned when a client acts on a conversation that has
+// received new messages since the version the client saw.
+var ErrStale = errors.New("会话在你查看之后有新消息")
 
 // Open opens (and migrates) the database at path.
 func Open(path string, tri *triage.Engine) (*Store, error) {
@@ -96,8 +114,28 @@ func Open(path string, tri *triage.Engine) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &Store{db: db, tri: tri}, nil
+	s := &Store{db: db, tri: tri}
+	var cur int64
+	if err := db.QueryRow(`SELECT IFNULL(MAX(change_seq), 0) FROM conversations`).Scan(&cur); err != nil {
+		return nil, err
+	}
+	s.seq.Store(cur)
+	// Idempotency receipts are kept for 30 days.
+	_, _ = db.Exec(`DELETE FROM client_ops WHERE created_at < ?`, time.Now().Add(-30*24*time.Hour).UnixMilli())
+	return s, nil
 }
+
+// Seq returns the in-memory change counter (may include uncommitted writes).
+func (s *Store) Seq() int64 { return s.seq.Load() }
+
+// CommittedSeq returns the highest committed change sequence.
+func (s *Store) CommittedSeq(ctx context.Context) (int64, error) {
+	var v int64
+	err := s.db.QueryRowContext(ctx, `SELECT IFNULL(MAX(change_seq), 0) FROM conversations`).Scan(&v)
+	return v, err
+}
+
+func (s *Store) nextSeq() int64 { return s.seq.Add(1) }
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
@@ -134,16 +172,28 @@ func (s *Store) changed(source string) {
 func (s *Store) UpsertConversation(ctx context.Context, c model.Conversation) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO conversations (id, source, platform, native_id, kind, title, avatar, title_alert)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	// Connectors re-upsert every poll round; only real changes bump change_seq.
+	res, err := s.db.ExecContext(ctx, `
+INSERT INTO conversations (id, source, platform, native_id, kind, title, avatar, title_alert, change_seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   kind = excluded.kind,
   title = CASE WHEN excluded.title != '' THEN excluded.title ELSE conversations.title END,
   avatar = CASE WHEN excluded.avatar != '' THEN excluded.avatar ELSE conversations.avatar END,
-  title_alert = CASE WHEN excluded.title != '' THEN excluded.title_alert ELSE conversations.title_alert END`,
-		c.ID, c.Source, c.Platform, c.NativeID, c.Kind, c.Title, c.Avatar, b2i(s.tri.ConversationIsAlert(c)))
-	return err
+  title_alert = CASE WHEN excluded.title != '' THEN excluded.title_alert ELSE conversations.title_alert END,
+  change_seq = excluded.change_seq
+WHERE conversations.kind != excluded.kind
+   OR (excluded.title != '' AND conversations.title != excluded.title)
+   OR (excluded.avatar != '' AND conversations.avatar != excluded.avatar)`,
+		c.ID, c.Source, c.Platform, c.NativeID, c.Kind, c.Title, c.Avatar, b2i(s.tri.ConversationIsAlert(c)), s.seq.Load()+1)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.nextSeq()
+		s.changed(c.Source)
+	}
+	return nil
 }
 
 // IngestMessages stores messages idempotently and updates conversation
@@ -216,10 +266,11 @@ UPDATE conversations SET
   msg_count = msg_count + 1,
   last_message_at = CASE WHEN ? THEN ? ELSE last_message_at END,
   last_preview = CASE WHEN ? THEN ? ELSE last_preview END,
-  last_sender = CASE WHEN ? THEN ? ELSE last_sender END
+  last_sender = CASE WHEN ? THEN ? ELSE last_sender END,
+  change_seq = ?
 WHERE id = ?`,
 			incUnread, incMention, needs, needs, b2i(s.tri.MessageIsAlert(m)),
-			isNewest, sent, isNewest, preview, isNewest, sender, c.ID)
+			isNewest, sent, isNewest, preview, isNewest, sender, s.nextSeq(), c.ID)
 		if err != nil {
 			return err
 		}
@@ -348,6 +399,10 @@ FROM conversations WHERE `+strings.Join(conds, " AND ")+` ORDER BY last_message_
 		return nil, err
 	}
 	defer rows.Close()
+	return scanConvRows(rows)
+}
+
+func scanConvRows(rows *sql.Rows) ([]ConversationRow, error) {
 	out := []ConversationRow{}
 	for rows.Next() {
 		var r ConversationRow
@@ -425,25 +480,144 @@ func (s *Store) ListMessages(ctx context.Context, convID string, before time.Tim
 	return out, rows.Err()
 }
 
-// MarkRead zeroes unread/mentions.
-func (s *Store) MarkRead(ctx context.Context, id string) error {
+// MarkRead marks a conversation read up to seenAt — the newest message the
+// client had on screen (zero means "everything"). Messages that arrived
+// after seenAt stay unread, so a stale client never swallows them.
+func (s *Store) MarkRead(ctx context.Context, id string, seenAt time.Time) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	_, err := s.db.ExecContext(ctx, `UPDATE conversations SET unread = 0, mentions = 0, last_read_at = MAX(last_read_at, last_message_at) WHERE id = ?`, id)
-	if err == nil {
-		s.changed("")
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := s.markReadTx(ctx, tx, id, seenAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.changed("")
+	return nil
 }
 
-// MarkDone removes a conversation from 需要看 (and marks it read).
-func (s *Store) MarkDone(ctx context.Context, id string) error {
-	s.wmu.Lock()
-	_, err := s.db.ExecContext(ctx, `UPDATE conversations SET needs_attention = 0, unread = 0, mentions = 0, last_read_at = MAX(last_read_at, last_message_at) WHERE id = ?`, id)
-	s.wmu.Unlock()
-	if err == nil {
-		s.changed("")
+// markReadTx returns how many non-self messages remain unread after seenAt.
+func (s *Store) markReadTx(ctx context.Context, tx *sql.Tx, id string, seenAt time.Time) (int, error) {
+	var lastAt, lastRead int64
+	err := tx.QueryRowContext(ctx, `SELECT last_message_at, last_read_at FROM conversations WHERE id = ?`, id).Scan(&lastAt, &lastRead)
+	if err != nil {
+		return 0, err
 	}
+	upTo := ms(seenAt)
+	if upTo == 0 || upTo > lastAt {
+		upTo = lastAt
+	}
+	newRead := max(lastRead, upTo)
+	unread, mentions := 0, 0
+	if newRead < lastAt {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), IFNULL(SUM(mentions_me), 0) FROM messages
+WHERE conversation_id = ? AND is_self = 0 AND sent_at > ?`, id, newRead).Scan(&unread, &mentions); err != nil {
+			return 0, err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE conversations SET unread = ?, mentions = ?, last_read_at = ?, change_seq = ? WHERE id = ?`,
+		unread, mentions, newRead, s.nextSeq(), id)
+	return unread, err
+}
+
+// MarkDone removes a conversation from 需要看 and marks it read. If messages
+// from others arrived after seenAt (the version the client acted on), the
+// conversation is only marked read up to seenAt and ErrStale is returned —
+// the newer messages must not be silently dismissed. Zero seenAt skips the
+// check.
+func (s *Store) MarkDone(ctx context.Context, id string, seenAt time.Time) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	remaining, err := s.markReadTx(ctx, tx, id, seenAt)
+	if err != nil {
+		return err
+	}
+	stale := !seenAt.IsZero() && remaining > 0
+	if !stale {
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET needs_attention = 0 WHERE id = ?`, id); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.changed("")
+	if stale {
+		return ErrStale
+	}
+	return nil
+}
+
+// Changes returns conversations changed after `since`, oldest change first.
+// reset=true means the client is too far behind (more than limit changes)
+// and should refetch its views instead of applying a delta.
+func (s *Store) Changes(ctx context.Context, since int64, limit int) (rows []ConversationRow, cur int64, reset bool, err error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 500
+	}
+	// Use the committed high-water mark, not the in-memory counter: a write
+	// transaction may have taken seq numbers it has not committed yet.
+	if cur, err = s.CommittedSeq(ctx); err != nil {
+		return nil, 0, false, err
+	}
+	if since > cur { // hub DB was reset/replaced
+		return nil, cur, true, nil
+	}
+	r, err := s.db.QueryContext(ctx, `
+SELECT id, source, platform, native_id, kind, title, avatar, last_message_at, last_preview, last_sender, unread, mentions, needs_attention, `+isAlert+`
+FROM conversations WHERE change_seq > ? AND change_seq <= ? ORDER BY change_seq ASC LIMIT ?`, since, cur, limit+1)
+	if err != nil {
+		return nil, cur, false, err
+	}
+	defer r.Close()
+	rows, err = scanConvRows(r)
+	if err != nil {
+		return nil, cur, false, err
+	}
+	if len(rows) > limit {
+		return nil, cur, true, nil
+	}
+	return rows, cur, false, nil
+}
+
+// Op is a stored idempotency receipt.
+type Op struct {
+	Status int // 0 = in progress
+	Body   string
+}
+
+// BeginOp claims an idempotency key. If the key was seen before, it returns
+// the stored receipt (Status 0 if the first request is still running).
+func (s *Store) BeginOp(ctx context.Context, key string) (*Op, error) {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO client_ops (key, created_at) VALUES (?, ?)`, key, time.Now().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil, nil
+	}
+	var op Op
+	err = s.db.QueryRowContext(ctx, `SELECT status, body FROM client_ops WHERE key = ?`, key).Scan(&op.Status, &op.Body)
+	return &op, err
+}
+
+// FinishOp stores the final response for an idempotency key.
+func (s *Store) FinishOp(ctx context.Context, key string, status int, body string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	_, err := s.db.ExecContext(ctx, `UPDATE client_ops SET status = ?, body = ? WHERE key = ?`, status, body, key)
 	return err
 }
 

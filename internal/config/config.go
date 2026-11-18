@@ -7,6 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/yintamaa/life-agent/internal/api"
 	"github.com/yintamaa/life-agent/internal/connector/feishu"
 	"github.com/yintamaa/life-agent/internal/connector/mail"
 	"github.com/yintamaa/life-agent/internal/connector/qq"
@@ -18,6 +19,7 @@ import (
 type Config struct {
 	Listen  string         `yaml:"listen"`
 	DataDir string         `yaml:"data_dir"`
+	Auth    api.AuthConfig `yaml:"auth"`
 	Triage  triage.Config  `yaml:"triage"`
 	Feishu  feishu.Config  `yaml:"feishu"`
 	WeChat  wechat.Config  `yaml:"wechat"`

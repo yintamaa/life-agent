@@ -109,7 +109,7 @@ func TestViewsAndTriage(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("needs", "grp")
-	if err := s.MarkDone(ctx, "x:grp"); err != nil {
+	if err := s.MarkDone(ctx, "x:grp", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	check("needs")
@@ -167,5 +167,82 @@ func TestLearnNames(t *testing.T) {
 	}
 	if hits, _ := s.Search(ctx, "hello world", 0); len(hits) != 1 {
 		t.Fatalf("fts after update: %d", len(hits))
+	}
+}
+
+func TestStaleDoneAndPartialRead(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	now := time.Now()
+	_ = s.UpsertConversation(ctx, conv("dm", "p2p", "张三"))
+	_ = s.IngestMessages(ctx, []model.Message{msg("1", "dm", false, "在吗", now.Add(-time.Minute))})
+	seen := now.Add(-time.Minute) // phone saw message 1 ...
+	// ... then message 2 arrives before the phone taps "done".
+	_ = s.IngestMessages(ctx, []model.Message{msg("2", "dm", false, "急！", now)})
+
+	if err := s.MarkDone(ctx, "x:dm", seen); err != ErrStale {
+		t.Fatalf("want ErrStale, got %v", err)
+	}
+	rows, _ := s.ListConversations(ctx, "needs", "", time.Time{}, 0)
+	if len(rows) != 1 || rows[0].Unread != 1 {
+		t.Fatalf("stale done must keep needs-attention and 1 unread: %+v", rows)
+	}
+	// A client that saw the latest message can mark it done.
+	if err := s.MarkDone(ctx, "x:dm", now); err != nil {
+		t.Fatal(err)
+	}
+	if rows, _ := s.ListConversations(ctx, "needs", "", time.Time{}, 0); len(rows) != 0 {
+		t.Fatalf("done should clear: %+v", rows)
+	}
+	// MarkRead with an old seen_at leaves newer messages unread.
+	_ = s.IngestMessages(ctx, []model.Message{msg("3", "dm", false, "a", now.Add(time.Second)), msg("4", "dm", false, "b", now.Add(2*time.Second))})
+	if err := s.MarkRead(ctx, "x:dm", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = s.ListConversations(ctx, "all", "", time.Time{}, 0)
+	if rows[0].Unread != 1 {
+		t.Fatalf("want 1 unread after partial read, got %d", rows[0].Unread)
+	}
+}
+
+func TestChanges(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	_ = s.UpsertConversation(ctx, conv("a", "p2p", "A"))
+	_ = s.UpsertConversation(ctx, conv("b", "p2p", "B"))
+	base, _ := s.CommittedSeq(ctx)
+	// Re-upserting identical metadata (every poll round) must not bump.
+	_ = s.UpsertConversation(ctx, conv("a", "p2p", "A"))
+	if cur, _ := s.CommittedSeq(ctx); cur != base {
+		t.Fatalf("no-op upsert bumped seq %d -> %d", base, cur)
+	}
+	_ = s.IngestMessages(ctx, []model.Message{msg("1", "b", false, "hi", time.Now())})
+	rows, cur, reset, err := s.Changes(ctx, base, 0)
+	if err != nil || reset || len(rows) != 1 || rows[0].NativeID != "b" || cur <= base {
+		t.Fatalf("changes: rows=%+v cur=%d reset=%v err=%v", rows, cur, reset, err)
+	}
+	if rows, _, _, _ := s.Changes(ctx, cur, 0); len(rows) != 0 {
+		t.Fatalf("expected no changes after cur: %+v", rows)
+	}
+	if _, _, reset, _ := s.Changes(ctx, 0, 1); !reset {
+		t.Fatal("too many changes should reset")
+	}
+	if _, _, reset, _ := s.Changes(ctx, cur+100, 0); !reset {
+		t.Fatal("cursor ahead of hub should reset")
+	}
+}
+
+func TestOps(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if op, err := s.BeginOp(ctx, "k"); op != nil || err != nil {
+		t.Fatalf("first claim: %v %v", op, err)
+	}
+	if op, _ := s.BeginOp(ctx, "k"); op == nil || op.Status != 0 {
+		t.Fatalf("in-progress replay: %+v", op)
+	}
+	_ = s.FinishOp(ctx, "k", 204, "")
+	if op, _ := s.BeginOp(ctx, "k"); op == nil || op.Status != 204 {
+		t.Fatalf("finished replay: %+v", op)
 	}
 }

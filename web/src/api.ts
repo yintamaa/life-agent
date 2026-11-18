@@ -38,8 +38,16 @@ async function call<T>(real: () => Promise<T>, fake: () => T): Promise<T> {
   }
 }
 
-const post = (path: string, body?: unknown) =>
-  req<void>(path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+const post = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
+  req<void>(path, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json", ...headers } : headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+/** A fresh idempotency key; reuse the same key only for automatic retries of one send. */
+export const newOpKey = () =>
+  (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 export const api = {
   sources: () => call(() => req<Source[]>("/api/sources"), mock.sources),
@@ -50,13 +58,22 @@ export const api = {
       () => mock.conversations(view, source),
     ),
   messages: (id: string) => call(() => req<Message[]>(`/api/conversations/${enc(id)}/messages?limit=50`), () => mock.messages(id)),
-  read: (id: string) => call(() => post(`/api/conversations/${enc(id)}/read`), () => mock.read(id)),
-  done: (id: string) => call(() => post(`/api/conversations/${enc(id)}/done`), () => mock.done(id)),
-  send: (id: string, text: string) => call(() => post(`/api/conversations/${enc(id)}/send`, { text }), () => mock.send(id, text)),
+  /** seenAt = newest message the user had on screen; newer messages stay unread. */
+  read: (id: string, seenAt?: string) =>
+    call(() => post(`/api/conversations/${enc(id)}/read`, seenAt ? { seen_at: seenAt } : undefined), () => mock.read(id)),
+  /** Rejects with ApiError 409 if messages arrived after seenAt (they won't be dismissed). */
+  done: (id: string, seenAt?: string) =>
+    call(() => post(`/api/conversations/${enc(id)}/done`, seenAt ? { seen_at: seenAt } : undefined), () => mock.done(id)),
+  send: (id: string, text: string, opKey: string) =>
+    call(() => post(`/api/conversations/${enc(id)}/send`, { text }, { "Idempotency-Key": opKey }), () => mock.send(id, text)),
   search: (q: string) => call(() => req<SearchHit[]>(`/api/search?q=${enc(q)}&limit=50`), () => mock.search(q)),
 };
 
-/** Subscribe to backend change events. Returns unsubscribe. No-op in mock mode. */
+/**
+ * Subscribe to backend change events. Returns unsubscribe. No-op in mock mode.
+ * Each event carries the hub's change seq as its SSE id; on reconnect the
+ * browser sends Last-Event-ID and the hub immediately reports anything missed.
+ */
 export function subscribe(onChange: () => void): () => void {
   if (useMock || typeof EventSource === "undefined") return () => {};
   const es = new EventSource("/api/events");

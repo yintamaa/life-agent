@@ -1,4 +1,16 @@
 // Package api serves the JSON API, the SSE change feed and the embedded SPA.
+//
+// Multi-device consistency model (see docs/competitive-analysis.md §4):
+//   - The hub is the single source of truth; devices are views.
+//   - Every visible change stamps the conversation with a hub-wide change_seq.
+//     SSE events carry it as their id, so a reconnecting EventSource sends
+//     Last-Event-ID and is told immediately if it missed anything;
+//     GET /api/changes?since=N returns the delta (or reset=true).
+//   - read/done take the version the client saw (seen_at); newer messages
+//     are never swallowed by a stale device.
+//   - send takes an Idempotency-Key; retries replay the first result.
+//   - A subscriber that can't keep up is disconnected rather than silently
+//     dropped, so it reconnects and catches up.
 package api
 
 import (
@@ -26,16 +38,27 @@ type Server struct {
 	Connectors map[string]connector.Connector
 	Statuses   map[string]*connector.Status
 	Static     fs.FS // web/dist; may be nil
+	Auth       *Authenticator
 
 	mu   sync.Mutex
-	subs map[chan string]struct{}
+	subs map[*subscriber]struct{}
 	kick chan string
+}
+
+type subscriber struct {
+	ch   chan event
+	gone chan struct{} // closed when the hub drops a slow subscriber
+}
+
+type event struct {
+	Seq    int64  `json:"seq"`
+	Source string `json:"source"`
 }
 
 // NewServer creates a server; call Notify on any data/status change.
 func NewServer(st *store.Store, conns map[string]connector.Connector, stats map[string]*connector.Status, static fs.FS) *Server {
 	s := &Server{Store: st, Connectors: conns, Statuses: stats, Static: static,
-		subs: map[chan string]struct{}{}, kick: make(chan string, 64)}
+		subs: map[*subscriber]struct{}{}, kick: make(chan string, 256)}
 	go s.fanout()
 	return s
 }
@@ -44,7 +67,7 @@ func NewServer(st *store.Store, conns map[string]connector.Connector, stats map[
 func (s *Server) Notify(source string) {
 	select {
 	case s.kick <- source:
-	default:
+	default: // a flush is already pending; it will carry the latest seq
 	}
 }
 
@@ -60,12 +83,21 @@ func (s *Server) fanout() {
 			if len(pending) == 0 {
 				continue
 			}
+			seq, err := s.Store.CommittedSeq(context.Background())
+			if err != nil {
+				slog.Warn("sse: read seq", "err", err)
+				continue
+			}
 			s.mu.Lock()
 			for src := range pending {
-				for ch := range s.subs {
+				for sub := range s.subs {
 					select {
-					case ch <- src:
+					case sub.ch <- event{Seq: seq, Source: src}:
 					default:
+						// Never drop silently: disconnect, the client resumes
+						// with Last-Event-ID and refetches.
+						delete(s.subs, sub)
+						close(sub.gone)
 					}
 				}
 			}
@@ -85,13 +117,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/conversations/{id}/read", s.read)
 	mux.HandleFunc("POST /api/conversations/{id}/done", s.done)
 	mux.HandleFunc("POST /api/conversations/{id}/send", s.send)
+	mux.HandleFunc("GET /api/changes", s.changes)
 	mux.HandleFunc("GET /api/search", s.search)
 	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("GET /api/whoami", s.whoami)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	if s.Static != nil {
 		mux.Handle("/", spa(s.Static))
 	}
-	return logRequests(mux)
+	var h http.Handler = mux
+	if s.Auth != nil {
+		h = s.Auth.Middleware(h)
+	}
+	return logRequests(h)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -147,10 +185,14 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	s.fillCanSend(rows)
+	writeJSON(w, rows)
+}
+
+func (s *Server) fillCanSend(rows []store.ConversationRow) {
 	for i := range rows {
 		rows[i].CanSend = s.canSend(rows[i].Source)
 	}
-	writeJSON(w, rows)
 }
 
 func (s *Server) canSend(source string) bool {
@@ -166,6 +208,21 @@ func (s *Server) canSend(source string) bool {
 	return ok
 }
 
+func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
+	rows, cur, reset, err := s.Store.Changes(r.Context(), since, atoi(q.Get("limit")))
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.fillCanSend(rows)
+	if rows == nil {
+		rows = []store.ConversationRow{}
+	}
+	writeJSON(w, map[string]any{"seq": cur, "reset": reset, "conversations": rows})
+}
+
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	msgs, err := s.Store.ListMessages(r.Context(), r.PathValue("id"), parseTime(q.Get("before")), atoi(q.Get("limit")))
@@ -176,8 +233,23 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, msgs)
 }
 
+// seenAt reads the optional {"seen_at": RFC3339} body.
+func seenAt(r *http.Request) time.Time {
+	var body struct {
+		SeenAt string `json:"seen_at"`
+	}
+	if r.ContentLength != 0 {
+		_ = json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4<<10)).Decode(&body)
+	}
+	return parseTime(body.SeenAt)
+}
+
 func (s *Server) read(w http.ResponseWriter, r *http.Request) {
-	if err := s.Store.MarkRead(r.Context(), r.PathValue("id")); err != nil {
+	err := s.Store.MarkRead(r.Context(), r.PathValue("id"), seenAt(r))
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, 404, "conversation not found")
+		return
+	} else if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -185,11 +257,17 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) done(w http.ResponseWriter, r *http.Request) {
-	if err := s.Store.MarkDone(r.Context(), r.PathValue("id")); err != nil {
+	err := s.Store.MarkDone(r.Context(), r.PathValue("id"), seenAt(r))
+	switch {
+	case errors.Is(err, store.ErrStale):
+		writeErr(w, http.StatusConflict, err.Error())
+	case errors.Is(err, sql.ErrNoRows):
+		writeErr(w, 404, "conversation not found")
+	case err != nil:
 		writeErr(w, 500, err.Error())
-		return
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
@@ -209,18 +287,51 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snd, ok := s.Connectors[conv.Source].(connector.Sender)
-	if !ok {
+	if !ok || !s.canSend(conv.Source) {
 		writeErr(w, http.StatusNotImplemented, connector.ErrSendUnsupported.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-	if err := snd.Send(ctx, conv.NativeID, body.Text); err != nil {
-		code := http.StatusBadGateway
-		if errors.Is(err, connector.ErrSendUnsupported) {
-			code = http.StatusNotImplemented
+
+	// Idempotency: the same key always yields the first request's outcome,
+	// so a client retrying after a network blip never double-sends.
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key != "" {
+		key = conv.ID + "|" + key
+		prev, err := s.Store.BeginOp(r.Context(), key)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
 		}
-		writeErr(w, code, err.Error())
+		if prev != nil {
+			w.Header().Set("Idempotent-Replayed", "true")
+			switch {
+			case prev.Status == 0:
+				writeErr(w, http.StatusConflict, "同一条消息正在发送中")
+			case prev.Status == http.StatusNoContent:
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				writeErr(w, prev.Status, prev.Body)
+			}
+			return
+		}
+	}
+	// Don't let a client disconnect abort a send that may already be in flight.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+	defer cancel()
+	status, msg := http.StatusNoContent, ""
+	if err := snd.Send(ctx, conv.NativeID, body.Text); err != nil {
+		status, msg = http.StatusBadGateway, err.Error()
+		if errors.Is(err, connector.ErrSendUnsupported) {
+			status = http.StatusNotImplemented
+		}
+	}
+	if key != "" {
+		if err := s.Store.FinishOp(ctx, key, status, msg); err != nil {
+			slog.Warn("idempotency receipt", "err", err)
+		}
+	}
+	if status != http.StatusNoContent {
+		writeErr(w, status, msg)
 		return
 	}
 	// The sent message shows up on the connector's next sync.
@@ -237,6 +348,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, hits)
 }
 
+func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"user": UserFrom(r.Context())})
+}
+
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
@@ -246,27 +361,48 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
-	ch := make(chan string, 16)
+	sub := &subscriber{ch: make(chan event, 32), gone: make(chan struct{})}
 	s.mu.Lock()
-	s.subs[ch] = struct{}{}
+	s.subs[sub] = struct{}{}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		delete(s.subs, ch)
+		delete(s.subs, sub)
 		s.mu.Unlock()
 	}()
-	_, _ = w.Write([]byte(": ok\n\n"))
-	fl.Flush()
+
+	write := func(ev event) {
+		b, _ := json.Marshal(ev)
+		_, _ = w.Write([]byte("id: " + strconv.FormatInt(ev.Seq, 10) + "\nevent: changed\ndata: " + string(b) + "\n\n"))
+		fl.Flush()
+	}
+	_, _ = w.Write([]byte("retry: 3000\n\n"))
+	cur, err := s.Store.CommittedSeq(r.Context())
+	if err != nil {
+		return
+	}
+	// Resume: EventSource re-sends the last id it saw. If anything changed
+	// meanwhile, tell the client right away so it refetches.
+	last := r.Header.Get("Last-Event-ID")
+	if last == "" {
+		last = r.URL.Query().Get("since")
+	}
+	if n, err := strconv.ParseInt(last, 10, 64); err == nil && n != cur {
+		write(event{Seq: cur, Source: ""})
+	} else {
+		_, _ = w.Write([]byte("id: " + strconv.FormatInt(cur, 10) + "\n: ok\n\n"))
+		fl.Flush()
+	}
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case src := <-ch:
-			b, _ := json.Marshal(map[string]string{"source": src})
-			_, _ = w.Write([]byte("event: changed\ndata: " + string(b) + "\n\n"))
-			fl.Flush()
+		case <-sub.gone:
+			return
+		case ev := <-sub.ch:
+			write(ev)
 		case <-ping.C:
 			_, _ = w.Write([]byte(": ping\n\n"))
 			fl.Flush()

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -76,6 +77,10 @@ func run(cfgPath string) error {
 	byID := map[string]connector.Connector{}
 	stats := map[string]*connector.Status{}
 	srv := api.NewServer(st, byID, stats, web.Dist())
+	srv.Auth = api.NewAuthenticator(cfg.Auth)
+	if host, _, _ := net.SplitHostPort(cfg.Listen); host != "127.0.0.1" && host != "localhost" && host != "::1" && len(cfg.Auth.Tokens) == 0 {
+		slog.Warn("listen 不是本机回环地址，且未配置 auth.tokens：非本机请求都会被拒绝。推荐保持 127.0.0.1 + tailscale serve", "listen", cfg.Listen)
+	}
 	st.OnChange = srv.Notify
 	for _, c := range conns {
 		byID[c.ID()] = c

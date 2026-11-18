@@ -1,7 +1,7 @@
 import { AtSign, CircleDot, Hand, MessageSquareText, MessagesSquare, Siren, User, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { api, isMock, subscribe } from "../api";
+import { api, ApiError, isMock, subscribe } from "../api";
 import { ConversationList } from "./ConversationList";
 import { SourceStrip } from "./SourceStrip";
 import { Thread } from "./Thread";
@@ -42,6 +42,12 @@ export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => vo
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [version, setVersion] = useState(0);
   const [mock, setMock] = useState(isMock());
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const loadSources = useCallback(() => api.sources().then(setSources).catch(() => {}), []);
   const loadCounts = useCallback(() => api.counts().then((c) => { setCounts(c); onCounts(c); }).catch(() => {}), [onCounts]);
@@ -91,19 +97,26 @@ export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => vo
   const open = (c: Conversation) => {
     setSelected(c);
     if (c.unread > 0 || c.mentions > 0) {
-      api.read(c.id).then(() => {
+      api.read(c.id, c.last_message_at).then(() => {
         setConvs((list) => list.map((x) => (x.id === c.id ? { ...x, unread: 0, mentions: 0 } : x)));
         loadCounts();
       }).catch(() => {});
     }
   };
 
-  const done = (c: Conversation) => {
-    api.done(c.id).then(() => {
+  const done = (c: Conversation, seenAt?: string) => {
+    api.done(c.id, seenAt).then(() => {
       setSelected((cur) => (cur && cur.id === c.id ? { ...cur, needs_attention: false } : cur));
       if (view === "needs") setConvs((list) => list.filter((x) => x.id !== c.id));
       loadCounts();
-    }).catch(() => {});
+    }).catch((e) => {
+      if (e instanceof ApiError && e.status === 409) {
+        setNotice("处理期间有新消息，已保留在「需要看」");
+        refreshAll.current();
+      } else {
+        setNotice(`操作失败：${(e as Error).message}`);
+      }
+    });
   };
 
   return (
@@ -115,6 +128,7 @@ export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => vo
           {mock && <span className="mock-tag" title="后端未连接，正在展示示例数据">示例数据</span>}
         </div>
         <p className="page-sub">微信、飞书、QQ、邮件的会话在一处；线上告警单独一栏</p>
+        {notice && <div className="notice" role="status">{notice}</div>}
         <div className="tabs" role="tablist">
           {TABS.map((t) => {
             const Icon = t.icon;

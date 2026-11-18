@@ -54,3 +54,10 @@ mail:                         # 任意多个 IMAP 邮箱，每个是独立的 so
   #   username: me@company.com
   #   password_cmd: security find-generic-password -w -s life-agent-work
   #   folders: [INBOX]
+
+auth:                         # 多端访问：hub 保持 127.0.0.1，前面挂 tailscale serve
+  tailscale:
+    enabled: false
+    # cli_path: /Applications/Tailscale.app/Contents/MacOS/Tailscale   # 不在 PATH 时指定
+    allowed_logins: ["you@github"]   # 只放行你自己的 Tailscale 账号（用 tailscale whois 反查验证）
+  tokens: []                  # 脚本/远程 agent 用的 Bearer token
