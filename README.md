@@ -1,23 +1,27 @@
 # life-agent
 
-**个人消息数据层：全渠道收件箱 + 分拣 + 搜索。**
+**个人工作平台：IM 是信息入口，多 Agent 协同是干活的能力。**
 
-你的消息散落在微信、飞书、QQ 和好几个邮箱里。life-agent 把它们**原样收进一个地方**：统一存储、统一去重和计未读、自动分出"需要看"和"线上告警"、跨渠道全文搜索。手机和电脑通过一个常驻的 hub 协同使用。界面风格仿 Multica / Linear。
+- **信息入口**：你的消息散落在微信、飞书、QQ 和好几个邮箱里。life-agent 把它们原样收进一个地方，统一存储、去重和计未读，自动分出"需要看"和"线上告警"，支持跨渠道全文搜索。
+- **干活的能力**（设计中）：把事情交给 Agent。Agent 跑在你各台机器上，驱动 Claude Code、Codex 等 CLI，带着你的 skills；任务进度和审批在手机、电脑上实时同步。
+- **两者闭环**：消息 → 分拣 → 任务 → Agent 执行 → 起草回复，你确认后发回原会话。
 
-它是一个更大的"个人一站式工作平台"的第一块。待办、日记、账本等模块以后都会建立在这层消息数据之上。
+手机和电脑通过一个常驻的 hub 协同使用。界面风格仿 Multica / Linear。待办、日记、账本等模块以后也会建立在这个平台上。
 
-## 和 OpenClaw / Persona / botmux 有什么不同
+## 和 OpenClaw / Persona / botmux / Multica 有什么不同
 
-这些项目都以 **Agent 为中心**，IM 只是给 AI 的输入输出渠道。它们不存、也读不到你和朋友之间的微信或 QQ 聊天记录。life-agent 反过来，**把消息本身当作一等数据**。
+| | 任务从哪来 | Agent 拿得到的上下文 | 存 IM 正文 | 微信 / QQ 聊天记录 | 重量 |
+|---|---|---|---|---|---|
+| OpenClaw | IM 私聊汇入一个 AI 助手 | 和助手的对话 | 只存 AI 对话 | ✗ | 重 |
+| Persona | 和主 Agent 对话 | Inbox 摘要、连接器 | ✗ | ✗ | 重 |
+| botmux | 飞书话题（一个话题一个 CLI） | 当前话题 | ✗（留在飞书） | ✗ | 中 |
+| Multica | issue 看板 | issue 内容 | ✗ | ✗ | 中重 |
+| **life-agent** | **全渠道消息**、看板、主 Agent | **完整的 IM 历史和全文搜索** | ✅ | ✅ | 轻 |
 
-| | 消息在系统里的角色 | 存 IM 正文 | 微信 / QQ 聊天记录 |
-|---|---|---|---|
-| OpenClaw | 和 AI 助手对话的渠道 | 只存 AI 对话 | ✗ |
-| Persona | 主 Agent 的输入；Inbox 只存摘要 | ✗ | ✗ |
-| botmux | 远程操控编码 CLI 的指令 | ✗（留在飞书） | ✗ |
-| **life-agent** | **数据本身** | ✅ | ✅ |
+我们的切入点是**消息驱动的工作**：任务带着完整的消息上下文进来，做完再回到消息里去。
 
-详细的定位、多端同步对比和借鉴清单见 [docs/competitive-analysis.md](docs/competitive-analysis.md)。
+- 详细的定位、多端同步对比和借鉴清单：[docs/competitive-analysis.md](docs/competitive-analysis.md)
+- Agent 协同设计（草案）：[docs/design-agents.md](docs/design-agents.md)
 
 ## 架构
 
@@ -94,8 +98,10 @@ tailscale serve --bg --https=8443 http://127.0.0.1:7788
 - [x] 多端同步 v1：Tailscale 鉴权、变更序号续传、已处理版本校验、发送幂等
 - [ ] 推送：只在会话变成"需要看"时推（Web Push / Bark）
 - [ ] LLM 分拣：分成"需要处理 / 知悉 / 噪音"三档
-- [ ] agent 模式：连接器分散到其它机器（工作电脑上的飞书、虚拟机里的 QQ）
-- [ ] 从消息里抽取待办，接入「待办」模块
+- [ ] node 模式：每台机器一个 node，主动外连 hub，承载这台机器上的连接器和 Agent 运行时
+- [ ] Agent 运行时适配：Claude Code、Codex；每个任务一个 git worktree；复用 skill-hub
+- [ ] 任务（「待办」模块）：从消息一键转任务、规则触发（如告警自动诊断）、手机审批
+- [ ] 主 Agent 拆解任务，多 node 并行
 - [ ] 更多渠道：iMessage、Telegram
 
 ## 目录
@@ -108,6 +114,6 @@ internal/store/         SQLite 存储、视图、搜索、变更序号
 internal/triage/        分拣规则
 internal/api/           REST + SSE + 鉴权 + 静态资源
 web/                    Vite + React 前端（构建产物嵌入二进制）
-docs/                   渠道接入说明、竞品分析
+docs/                   渠道接入说明、竞品分析、Agent 协同设计
 deploy/                 launchd 常驻配置
 ```
