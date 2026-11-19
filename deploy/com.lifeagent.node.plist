@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  常驻运行独立 node（例如工作电脑）：
+    1. 把下面的 /path/to/life-agent 改成仓库绝对路径
+    2. cp deploy/com.lifeagent.node.plist ~/Library/LaunchAgents/
+    3. launchctl load -w ~/Library/LaunchAgents/com.lifeagent.node.plist
+  用 LaunchAgent（用户会话）而不是 LaunchDaemon：lark-cli 的登录态、钥匙串、
+  微信数据目录都在当前用户下。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.lifeagent.node</string>
+  <key>WorkingDirectory</key><string>/path/to/life-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/life-agent/bin/lifeagent</string>
+    <string>node</string>
+    <string>-config</string><string>/path/to/life-agent/node.yaml</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/lifeagent-node.log</string>
+  <key>StandardErrorPath</key><string>/tmp/lifeagent-node.log</string>
+</dict>
+</plist>

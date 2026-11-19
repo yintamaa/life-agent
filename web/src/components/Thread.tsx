@@ -1,4 +1,4 @@
-import { Check, ExternalLink, FileText, Image as ImageIcon, Link2, Mic, SendHorizontal, Video } from "lucide-react";
+import { Bot, Check, ExternalLink, FileText, Image as ImageIcon, Link2, Mic, SendHorizontal, Video } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { api, ApiError, newOpKey } from "../api";
 import { PLATFORM } from "../platform";
@@ -9,11 +9,13 @@ const TYPE_ICON: Partial<Record<Message["type"], typeof FileText>> = {
   image: ImageIcon, file: FileText, voice: Mic, video: Video, link: Link2,
 };
 
-export function Thread({ conv, version, onDone, onSent }: {
+export function Thread({ conv, version, onDone, onSent, agentReady = false, onHandoff }: {
   conv: Conversation;
   version: number;
   onDone: (c: Conversation, seenAt?: string) => void;
   onSent: () => void;
+  agentReady?: boolean;
+  onHandoff?: (c: Conversation) => void;
 }) {
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,12 @@ export function Thread({ conv, version, onDone, onSent }: {
           </span>
         </div>
         <div className="thread-actions">
+          {onHandoff && (
+            <button className="btn btn-ghost btn-agent" onClick={() => onHandoff(conv)} disabled={!agentReady}
+              title={agentReady ? "带着这个会话的上下文，把事情交给 Agent" : "没有在线的 Agent 节点（config.yaml 里配置 node）"}>
+              <Bot size={14} /> <span className="btn-label">交给 Agent</span>
+            </button>
+          )}
           {conv.needs_attention && (
             <button className="btn btn-ghost" onClick={() => onDone(conv, msgs.length ? msgs[msgs.length - 1].sent_at : conv.last_message_at)} title="从“需要看”中移除">
               <Check size={14} /> 标记已处理

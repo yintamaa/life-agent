@@ -7,14 +7,18 @@ import type { LucideIcon } from "lucide-react";
 
 export type NavKey = string;
 
-interface Item { key: NavKey; label: string; icon: LucideIcon; badge?: number; tone?: string }
+interface Item { key: NavKey; label: string; icon: LucideIcon; badge?: number; tone?: string; alert?: boolean }
 interface Group { title: string; items: Item[]; collapsed?: boolean }
 
-export function Sidebar({ active, onNavigate, onSearch, messageBadge }: {
+export function Sidebar({ active, onNavigate, onSearch, messageBadge, todoBadge = 0, todoAlert = false }: {
   active: NavKey;
   onNavigate: (k: NavKey) => void;
   onSearch: () => void;
   messageBadge: number;
+  /** pending approvals, else active tasks */
+  todoBadge?: number;
+  /** badge counts approvals → warning tone */
+  todoAlert?: boolean;
 }) {
   const top: Item[] = [
     { key: "today", label: "今天", icon: Sun, tone: "#C98A1B" },
@@ -23,7 +27,7 @@ export function Sidebar({ active, onNavigate, onSearch, messageBadge }: {
   const groups: Group[] = [
     { title: "收藏", items: [
       { key: "messages", label: "消息", icon: MessageSquareText, badge: messageBadge, tone: "#B5652F" },
-      { key: "todo", label: "待办", icon: ListTodo, tone: "#3E6FB0" },
+      { key: "todo", label: "待办", icon: ListTodo, badge: todoBadge, tone: "#3E6FB0", alert: todoAlert },
       { key: "journal", label: "日记", icon: BookOpen, tone: "#B04A6E" },
     ] },
     { title: "工作台", items: [], collapsed: true },
@@ -54,7 +58,7 @@ export function Sidebar({ active, onNavigate, onSearch, messageBadge }: {
       <button key={it.key} className={`nav-row${active === it.key ? " is-active" : ""}`} onClick={() => onNavigate(it.key)}>
         <span className="nav-icon" style={{ color: it.tone }}><Icon size={16} strokeWidth={1.8} /></span>
         <span className="nav-label">{it.label}</span>
-        {it.badge ? <span className="nav-badge">{it.badge > 99 ? "99+" : it.badge}</span> : null}
+        {it.badge ? <span className={`nav-badge${it.alert ? " is-alert" : ""}`} title={it.alert ? "等待审批" : undefined}>{it.badge > 99 ? "99+" : it.badge}</span> : null}
       </button>
     );
   };

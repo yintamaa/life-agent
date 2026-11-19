@@ -2,6 +2,7 @@ import { AtSign, CircleDot, Hand, MessageSquareText, MessagesSquare, Siren, User
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { api, ApiError, isMock, subscribe } from "../api";
+import { ApprovalBanner } from "./ApprovalBanner";
 import { ConversationList } from "./ConversationList";
 import { SourceStrip } from "./SourceStrip";
 import { Thread } from "./Thread";
@@ -32,7 +33,13 @@ const params = new URLSearchParams(location.search);
 const initialView = (VIEWS as string[]).includes(params.get("v") ?? "") ? (params.get("v") as View) : "needs";
 const initialConv = params.get("c");
 
-export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => void; jumpTo?: { id: string; nonce: number } }) {
+export function MessagesPage({ onCounts, jumpTo, agentReady = false, onHandoff, onOpenApprovals }: {
+  onCounts: (c: Counts) => void;
+  jumpTo?: { id: string; nonce: number };
+  agentReady?: boolean;
+  onHandoff?: (c: Conversation) => void;
+  onOpenApprovals?: () => void;
+}) {
   const [view, setView] = useState<View>(initialView);
   const [source, setSource] = useState<string | undefined>();
   const [sources, setSources] = useState<Source[]>([]);
@@ -129,6 +136,7 @@ export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => vo
         </div>
         <p className="page-sub">微信、飞书、QQ、邮件的会话在一处；线上告警单独一栏</p>
         {notice && <div className="notice" role="status">{notice}</div>}
+        {onOpenApprovals && <ApprovalBanner count={counts?.approvals ?? 0} onOpen={onOpenApprovals} />}
         <div className="tabs" role="tablist">
           {TABS.map((t) => {
             const Icon = t.icon;
@@ -156,7 +164,8 @@ export function MessagesPage({ onCounts, jumpTo }: { onCounts: (c: Counts) => vo
           {selected ? (
             <>
               <button className="back-mobile" onClick={() => setSelected(null)}>← 返回</button>
-              <Thread conv={selected} version={version} onDone={done} onSent={() => { loadList(); loadCounts(); }} />
+              <Thread conv={selected} version={version} onDone={done} onSent={() => { loadList(); loadCounts(); }}
+                agentReady={agentReady} onHandoff={onHandoff} />
             </>
           ) : (
             <div className="thread-placeholder">
