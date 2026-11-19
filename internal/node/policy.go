@@ -52,7 +52,49 @@ const (
 	Ask   = "ask"
 )
 
-const shellMeta = ";&|<>`$\n"
+// Harmless redirects stripped before checking; anything else that writes
+// or substitutes (> < ` $( newline) still needs approval.
+var devNull = strings.NewReplacer("2>/dev/null", "", ">/dev/null", "", "2>&1", "", "&>/dev/null", "")
+
+// splitSimple splits a command line on ; && || | and reports whether it is
+// free of redirects and substitutions after removing /dev/null redirects.
+func splitSimple(cmd string) ([]string, bool) {
+	c := devNull.Replace(cmd)
+	if strings.ContainsAny(c, "<>`\n") || strings.Contains(c, "$(") {
+		return nil, false
+	}
+	for _, sep := range []string{"&&", "||", ";", "|"} {
+		c = strings.ReplaceAll(c, sep, "\x00")
+	}
+	if strings.Contains(c, "&") { // background jobs
+		return nil, false
+	}
+	var parts []string
+	for _, p := range strings.Split(c, "\x00") {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts, len(parts) > 0
+}
+
+// unsafeArgs turn otherwise read-only commands into writers/executors.
+var unsafeArgs = []string{"-exec", "-execdir", "-delete", "-ok ", "--output", "-o ", "--write"}
+
+func (p Policy) allowlisted(seg string) bool {
+	for _, a := range unsafeArgs {
+		if strings.Contains(seg+" ", a) {
+			return false
+		}
+	}
+	for _, pre := range p.AutoAllowBash {
+		pre = strings.TrimRight(pre, " ")
+		if pre != "" && (seg == pre || strings.HasPrefix(seg, pre+" ")) {
+			return true
+		}
+	}
+	return false
+}
 
 // Decide classifies one tool call. workdir is the task's working tree.
 func (p Policy) Decide(tool string, input map[string]any, workdir string) (string, string) {
@@ -79,11 +121,16 @@ func (p Policy) Decide(tool string, input map[string]any, workdir string) (strin
 				return Deny, "命中禁止规则：" + d
 			}
 		}
-		if !strings.ContainsAny(cmd, shellMeta) {
-			for _, pre := range p.AutoAllowBash {
-				if pre != "" && (cmd == strings.TrimSpace(pre) || strings.HasPrefix(cmd, pre)) {
-					return Allow, "白名单命令"
+		if parts, ok := splitSimple(cmd); ok {
+			all := true
+			for _, seg := range parts {
+				if !p.allowlisted(seg) {
+					all = false
+					break
 				}
+			}
+			if all {
+				return Allow, "白名单命令"
 			}
 		}
 		return Ask, "执行命令"

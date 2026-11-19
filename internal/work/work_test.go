@@ -148,3 +148,26 @@ func TestMessageToTaskFlow(t *testing.T) {
 		t.Fatalf("counts active=%d pending=%d", active, pending)
 	}
 }
+
+func TestApprovalsExpireWhenTurnEnds(t *testing.T) {
+	ctx := context.Background()
+	tri, _ := triage.New(triage.Config{})
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), tri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m := New(st)
+	_ = st.CreateTask(ctx, store.Task{ID: "t-0001", Title: "x", Status: store.TaskRunning, Node: "n", Workspace: "w", Runtime: "claude-code"})
+	_ = m.ApprovalRequest(ctx, node.ApprovalReq{ID: "a1", TaskID: "t-0001", Tool: "Bash", Input: "git push", ExpiresAt: time.Now().Add(time.Hour)})
+	if p, _ := st.ListApprovals(ctx, "t-0001", true); len(p) != 1 {
+		t.Fatalf("want 1 pending, got %d", len(p))
+	}
+	_ = m.SessionEvent(ctx, "t-0001", agent.Event{Type: node.EvState, Text: node.StateCancelled, At: time.Now()})
+	if p, _ := st.ListApprovals(ctx, "t-0001", true); len(p) != 0 {
+		t.Fatalf("cancelled task must not leave pending approvals: %+v", p)
+	}
+	if _, pending, _ := st.WorkCounts(ctx); pending != 0 {
+		t.Fatalf("badge count %d", pending)
+	}
+}

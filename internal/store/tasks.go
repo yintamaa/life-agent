@@ -379,3 +379,18 @@ func (s *Store) WorkCounts(ctx context.Context) (int, int, error) {
   (SELECT COUNT(*) FROM approvals WHERE status = 'pending' AND expires_at > ?)`, time.Now().UnixMilli()).Scan(&active, &pending)
 	return active, pending, err
 }
+
+// ExpireTaskApprovals expires all pending approvals of a task (the turn
+// ended, so nobody is waiting on them any more).
+func (s *Store) ExpireTaskApprovals(ctx context.Context, taskID string) error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	res, err := s.db.ExecContext(ctx, `UPDATE approvals SET status = 'expired' WHERE task_id = ? AND status = 'pending'`, taskID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.changed("tasks")
+	}
+	return nil
+}

@@ -346,6 +346,12 @@ func (m *Manager) SessionEvent(ctx context.Context, taskID string, ev agent.Even
 		case node.StateCancelled:
 			p.Status = ptr(store.TaskCanceled)
 		}
+		if ev.Text != node.StateRunning {
+			// The turn is over: nothing waits on its approvals any more.
+			if err := m.store.ExpireTaskApprovals(ctx, taskID); err != nil {
+				return err
+			}
+		}
 	case agent.EvResult:
 		p.Result = ptr(ev.Text)
 		if ev.CostUSD > 0 {
