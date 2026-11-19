@@ -12,6 +12,7 @@ import (
 	"github.com/yintamaa/life-agent/internal/connector/mail"
 	"github.com/yintamaa/life-agent/internal/connector/qq"
 	"github.com/yintamaa/life-agent/internal/connector/wechat"
+	"github.com/yintamaa/life-agent/internal/node"
 	"github.com/yintamaa/life-agent/internal/triage"
 )
 
@@ -25,6 +26,14 @@ type Config struct {
 	WeChat  wechat.Config  `yaml:"wechat"`
 	QQ      qq.Config      `yaml:"qq"`
 	Mail    []mail.Account `yaml:"mail"`
+	// Node runs agents on the hub machine itself (in-process node).
+	Node NodeConfig `yaml:"node"`
+}
+
+// NodeConfig enables the in-process node.
+type NodeConfig struct {
+	Enabled     bool `yaml:"enabled"`
+	node.Config `yaml:",inline"`
 }
 
 // Load reads and validates the file at path.

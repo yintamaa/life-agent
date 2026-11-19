@@ -30,6 +30,7 @@ import (
 	"github.com/yintamaa/life-agent/internal/connector"
 	"github.com/yintamaa/life-agent/internal/model"
 	"github.com/yintamaa/life-agent/internal/store"
+	"github.com/yintamaa/life-agent/internal/work"
 )
 
 // Server wires HTTP handlers to the store and connectors.
@@ -39,6 +40,7 @@ type Server struct {
 	Statuses   map[string]*connector.Status
 	Static     fs.FS // web/dist; may be nil
 	Auth       *Authenticator
+	Work       *work.Manager // nil when agent orchestration is disabled
 
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
@@ -121,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.search)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/whoami", s.whoami)
+	s.registerWork(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	if s.Static != nil {
 		mux.Handle("/", spa(s.Static))
@@ -170,6 +173,12 @@ func (s *Server) counts(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
+	}
+	if s.Work != nil {
+		if c["tasks_active"], c["approvals"], err = s.Store.WorkCounts(r.Context()); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	writeJSON(w, c)
 }

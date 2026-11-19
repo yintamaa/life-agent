@@ -51,11 +51,11 @@ type Config struct {
 
 // Connector implements connector.Connector (read-only).
 type Connector struct {
-	cfg         Config
-	zd          *zstd.Decoder
-	contacts    map[string]string            // username -> best display name
-	roomNames   map[string]map[string]string // chatroom -> member -> 群昵称
-	contactsAt  time.Time
+	cfg        Config
+	zd         *zstd.Decoder
+	contacts   map[string]string            // username -> best display name
+	roomNames  map[string]map[string]string // chatroom -> member -> 群昵称
+	contactsAt time.Time
 }
 
 // New creates the connector.

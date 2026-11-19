@@ -29,7 +29,7 @@ type Config struct {
 	MailNeedsAttention bool `yaml:"mail_needs_attention"`
 	// MentionAll: whether @所有人 counts as @我 (noisy in big groups; default off).
 	MentionAll bool        `yaml:"mention_all"`
-	Alert              AlertConfig `yaml:"alert"`
+	Alert      AlertConfig `yaml:"alert"`
 }
 
 // AlertConfig routes conversations to the 线上告警 lane.
@@ -43,9 +43,9 @@ type AlertConfig struct {
 
 // Engine is the compiled rule set.
 type Engine struct {
-	cfg                            Config
-	mute, alertConv, alertSender   []*regexp.Regexp
-	alertText                      []*regexp.Regexp
+	cfg                          Config
+	mute, alertConv, alertSender []*regexp.Regexp
+	alertText                    []*regexp.Regexp
 }
 
 // New compiles the rules. Patterns are case-insensitive regexps.

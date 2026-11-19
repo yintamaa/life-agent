@@ -35,7 +35,7 @@ func (m *memSink) IngestMessages(_ context.Context, ms []model.Message) error {
 	return nil
 }
 func (m *memSink) LearnNames(context.Context, string, map[string]string) error { return nil }
-func (m *memSink) Cursor(_ context.Context, s, k string) (string, error) { return m.cursors[s+k], nil }
+func (m *memSink) Cursor(_ context.Context, s, k string) (string, error)       { return m.cursors[s+k], nil }
 func (m *memSink) SetCursor(_ context.Context, s, k, v string) error {
 	m.cursors[s+k] = v
 	return nil
@@ -156,4 +156,3 @@ func TestSyncDecryptedV4(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
-

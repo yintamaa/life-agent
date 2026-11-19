@@ -115,8 +115,11 @@ func Open(path string, tri *triage.Engine) (*Store, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	s := &Store{db: db, tri: tri}
-	var cur int64
-	if err := db.QueryRow(`SELECT IFNULL(MAX(change_seq), 0) FROM conversations`).Scan(&cur); err != nil {
+	if err := s.migrateTasks(); err != nil {
+		return nil, fmt.Errorf("migrate tasks: %w", err)
+	}
+	cur, err := s.CommittedSeq(context.Background())
+	if err != nil {
 		return nil, err
 	}
 	s.seq.Store(cur)
@@ -131,7 +134,9 @@ func (s *Store) Seq() int64 { return s.seq.Load() }
 // CommittedSeq returns the highest committed change sequence.
 func (s *Store) CommittedSeq(ctx context.Context) (int64, error) {
 	var v int64
-	err := s.db.QueryRowContext(ctx, `SELECT IFNULL(MAX(change_seq), 0) FROM conversations`).Scan(&v)
+	err := s.db.QueryRowContext(ctx, `SELECT MAX(
+  (SELECT IFNULL(MAX(change_seq), 0) FROM conversations),
+  (SELECT IFNULL(MAX(change_seq), 0) FROM tasks))`).Scan(&v)
 	return v, err
 }
 

@@ -61,3 +61,18 @@ auth:                         # 多端访问：hub 保持 127.0.0.1，前面挂 
     # cli_path: /Applications/Tailscale.app/Contents/MacOS/Tailscale   # 不在 PATH 时指定
     allowed_logins: ["you@github"]   # 只放行你自己的 Tailscale 账号（用 tailscale whois 反查验证）
   tokens: []                  # 脚本/远程 agent 用的 Bearer token
+
+node:                         # 让这台机器跑 Agent（与 hub 同进程）；其它机器用 `lifeagent node` 接入（见 docs/design-agents.md）
+  enabled: false
+  name: mac-mini
+  claude_code: { enabled: true, path: claude }
+  codex: { enabled: true, path: codex }    # Codex 无交互模式不能逐步审批，靠 workspace-write 沙箱兜底
+  workspaces:                 # Agent 只能在这些目录里干活
+    - name: life-agent
+      path: ~/Project/life-agent
+      worktree: true          # 每个任务一个 git worktree + 分支 life-agent/<任务ID>
+  approval:                   # 默认：执行但每步审批（只读工具、工作区内改文件、白名单命令自动放行）
+    timeout: 30m
+    # auto_allow_tools: [Read, Glob, Grep, LS, TodoWrite, WebSearch]
+    # auto_allow_bash: ["git status", "git diff", "go test"]
+    # deny_bash: ["rm -rf /", "git push --force", "sudo "]

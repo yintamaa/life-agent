@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,12 +23,18 @@ import (
 	"github.com/yintamaa/life-agent/internal/connector/mail"
 	"github.com/yintamaa/life-agent/internal/connector/qq"
 	"github.com/yintamaa/life-agent/internal/connector/wechat"
+	"github.com/yintamaa/life-agent/internal/node"
 	"github.com/yintamaa/life-agent/internal/store"
 	"github.com/yintamaa/life-agent/internal/triage"
+	"github.com/yintamaa/life-agent/internal/work"
 	"github.com/yintamaa/life-agent/web"
 )
 
 func main() {
+	// `lifeagent hook`: Claude Code PreToolUse hook (approvals). Must never fail open.
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		os.Exit(node.RunHook(os.Stdin, os.Stdout, 0))
+	}
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	debug := flag.Bool("debug", false, "verbose logging")
 	flag.Parse()
@@ -90,6 +97,29 @@ func run(cfgPath string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Agent orchestration: the hub always has a task manager; remote nodes can
+	// attach later. The hub machine itself can also run agents (in-process node).
+	srv.Work = work.New(st)
+	if cfg.Node.Enabled {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if cfg.Node.DataDir == "" {
+			cfg.Node.DataDir = filepath.Join(cfg.DataDir, "node")
+		}
+		n, err := node.New(cfg.Node.Config, srv.Work, exe)
+		if err != nil {
+			return fmt.Errorf("node: %w", err)
+		}
+		go func() {
+			if err := n.Serve(ctx); err != nil {
+				slog.Error("node hook server", "err", err)
+			}
+		}()
+		srv.Work.Attach(work.LocalLink{N: n})
+	}
 	for _, c := range conns {
 		go func(c connector.Connector) {
 			slog.Info("connector start", "source", c.ID())
