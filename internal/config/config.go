@@ -64,3 +64,31 @@ func Load(path string) (*Config, error) {
 	}
 	return &c, nil
 }
+
+// NodeFile is the config of a standalone node (`lifeagent node`), e.g. on
+// the work laptop, connecting to a remote hub.
+type NodeFile struct {
+	HubURL      string `yaml:"hub_url"` // e.g. https://mac-mini.<tailnet>.ts.net:8443
+	Token       string `yaml:"token"`   // one of the hub's auth.tokens
+	node.Config `yaml:",inline"`
+}
+
+// LoadNode reads a standalone node config.
+func LoadNode(path string) (*NodeFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c NodeFile
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if c.HubURL == "" {
+		return nil, fmt.Errorf("%s: hub_url required", path)
+	}
+	if c.DataDir == "" {
+		c.DataDir = "data-node"
+	}
+	c.DataDir = node.ExpandHome(c.DataDir)
+	return &c, nil
+}

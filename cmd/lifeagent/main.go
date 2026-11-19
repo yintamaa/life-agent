@@ -35,6 +35,17 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "hook" {
 		os.Exit(node.RunHook(os.Stdin, os.Stdout, 0))
 	}
+	// `lifeagent node -config node.yaml`: standalone node dialing a remote hub.
+	if len(os.Args) > 1 && os.Args[1] == "node" {
+		fs := flag.NewFlagSet("node", flag.ExitOnError)
+		path := fs.String("config", "node.yaml", "path to node config")
+		_ = fs.Parse(os.Args[2:])
+		if err := runNode(*path); err != nil {
+			slog.Error("fatal", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	debug := flag.Bool("debug", false, "verbose logging")
 	flag.Parse()
@@ -168,4 +179,38 @@ func logStatusErrors(ctx context.Context, stats map[string]*connector.Status) {
 			}
 		}
 	}
+}
+
+func runNode(path string) error {
+	cfg, err := config.LoadNode(path)
+	if err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	n, err := node.New(cfg.Config, nil, exe)
+	if err != nil {
+		return err
+	}
+	cl, err := node.NewClient(cfg.HubURL, cfg.Token, n, cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer cl.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		if err := n.Serve(ctx); err != nil {
+			slog.Error("node hook server", "err", err)
+			stop()
+		}
+	}()
+	info := n.Info(ctx)
+	slog.Info("node starting", "name", info.Name, "hub", cfg.HubURL, "runtimes", len(info.Runtimes), "workspaces", len(info.Workspaces))
+	if err := cl.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return nil
 }

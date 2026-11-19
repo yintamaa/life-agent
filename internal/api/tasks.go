@@ -23,6 +23,11 @@ func (s *Server) registerWork(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/close", s.taskClose)
 	mux.HandleFunc("GET /api/approvals", s.listApprovals)
 	mux.HandleFunc("POST /api/approvals/{id}", s.decideApproval)
+	mux.HandleFunc("GET /api/node", func(w http.ResponseWriter, r *http.Request) {
+		if s.workOK(w) {
+			s.Work.ServeNode(w, r)
+		}
+	})
 }
 
 func (s *Server) workOK(w http.ResponseWriter) bool {

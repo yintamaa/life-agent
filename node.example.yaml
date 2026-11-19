@@ -1,0 +1,14 @@
+# 独立 node（例如工作电脑）：lifeagent node -config node.yaml
+# 主动外连 hub，公司代码只在这台机器上被 Agent 读写；hub 只收任务事件流。
+hub_url: https://mac-mini.your-tailnet.ts.net:8443   # hub 前面的 tailscale serve 地址
+token: "与 hub 的 auth.tokens 之一相同"
+name: work-laptop
+data_dir: ~/.life-agent/node     # outbox（断线续传）与 worktree 存放处
+claude_code: { enabled: true, path: claude }
+codex: { enabled: true, path: codex }
+workspaces:
+  - name: tos
+    path: ~/Project/tos
+    worktree: true
+approval:
+  timeout: 30m

@@ -144,6 +144,7 @@ func New(cfg Config, hub Hub, selfExe string) (*Node, error) {
 	if cfg.DataDir == "" {
 		cfg.DataDir = "data"
 	}
+	cfg.DataDir = expandHome(cfg.DataDir)
 	cfg.Approval = cfg.Approval.withDefaults()
 	n := &Node{cfg: cfg, hub: hub, runtimes: map[string]agent.Runtime{},
 		sessions: map[string]*session{}, pending: map[string]chan hookResponse{}}
@@ -178,6 +179,9 @@ func (n *Node) Name() string { return n.cfg.Name }
 
 // SetHub sets the hub link (used by the remote client, which is created after the node).
 func (n *Node) SetHub(h Hub) { n.hub = h }
+
+// ExpandHome expands a leading ~/ to the user's home directory.
+func ExpandHome(p string) string { return expandHome(p) }
 
 func expandHome(p string) string {
 	if strings.HasPrefix(p, "~/") {
