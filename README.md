@@ -8,7 +8,7 @@
 
 手机和电脑通过一个常驻的 hub 协同使用。界面风格仿 Multica / Linear。待办、日记、账本等模块以后也会建立在这个平台上。
 
-## 和 OpenClaw / Persona / botmux / Multica 有什么不同
+## 和 OpenClaw / Persona / botmux / Multica / HappyClaw 有什么不同
 
 | | 任务从哪来 | Agent 拿得到的上下文 | 存 IM 正文 | 微信 / QQ 聊天记录 | 重量 |
 |---|---|---|---|---|---|
@@ -16,6 +16,7 @@
 | Persona | 和主 Agent 对话 | Inbox 摘要、连接器 | ✗ | ✗ | 重 |
 | botmux | 飞书话题（一个话题一个 CLI） | 当前话题 | ✗（留在飞书） | ✗ | 中 |
 | Multica | issue 看板 | issue 内容 | ✗ | ✗ | 中重 |
+| HappyClaw | Web 和 8 个 IM 机器人里与 Bot 对话、定时任务 | 和 Bot 的会话 | 只存 Bot 会话 | ✗（都是官方 Bot 通道） | 中重（多用户 Node 单体） |
 | **life-agent** | **全渠道消息**、看板、主 Agent | **完整的 IM 历史和全文搜索** | ✅ | ✅ | 轻 |
 
 我们的切入点是**消息驱动的工作**：任务带着完整的消息上下文进来，做完再回到消息里去。
