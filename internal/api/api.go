@@ -158,7 +158,7 @@ func (s *Server) sources(w http.ResponseWriter, _ *http.Request) {
 	for _, st := range s.Statuses {
 		out = append(out, st.Snapshot())
 	}
-	order := map[string]int{model.PlatformWeChat: 0, model.PlatformFeishu: 1, model.PlatformQQ: 2, model.PlatformMail: 3}
+	order := map[string]int{model.PlatformWeChat: 0, model.PlatformFeishu: 1, model.PlatformQQ: 2, model.PlatformDiscord: 3, model.PlatformMail: 4}
 	sort.Slice(out, func(i, j int) bool {
 		if order[out[i].Platform] != order[out[j].Platform] {
 			return order[out[i].Platform] < order[out[j].Platform]

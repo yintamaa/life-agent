@@ -67,6 +67,34 @@ qq:
 
 ---
 
+## Discord
+
+**方式**：Bot 账号。通过 Gateway 实时接收消息，并用 REST 补拉每个可读频道和话题的历史消息。
+
+**为什么不用个人账号**：用户 token 自动化（selfbot）违反 Discord 服务条款，会被封号，所以不做。因此：
+- 能拿到：Bot 所在服务器里、Bot 有权限的频道和话题（**包括历史消息**），以及别人发给 Bot 的私信。
+- 拿不到：你个人号和朋友之间的私信。以后可以导入 Discord 官方的"数据包导出"（设置 → 数据与隐私 → 请求我的数据），离线补全。
+
+**配置步骤**：
+1. 在 [Developer Portal](https://discord.com/developers/applications) 新建应用 → Bot → Reset Token，把 token 放进环境变量（如 `DISCORD_BOT_TOKEN`）。
+2. 同一页面开启 **MESSAGE CONTENT INTENT**。不开的话，收到的消息正文是空的。
+3. OAuth2 → URL Generator：scope 选 `bot`，权限勾选 View Channels、Read Message History；需要回复时再勾选 Send Messages。用生成的链接把 Bot 拉进你的服务器。
+4. 在 Discord 设置里打开开发者模式，右键自己的头像 → 复制用户 ID，填到 `self_user_id`。这样你自己发的消息算"我"，@你的消息进「@我」。
+
+```yaml
+discord:
+  enabled: true
+  token_env: DISCORD_BOT_TOKEN
+  self_user_id: "123456789012345678"
+  guilds: []        # 可选：只同步这些服务器
+  send: false
+```
+
+**其它说明**：
+- 首次接入回填的历史视为已读。
+- `@everyone` / `@here` 默认不算 @我，可以用 `triage.mention_all` 打开。
+- 机器人发的告警卡片（embed）会参与告警识别，比如家里 NAS 的通知。
+
 ## 邮件（任意多个）
 
 每个账号是一个独立的 source（`mail:<id>`），状态栏里各自显示。按 References / In-Reply-To 归并成线程，一个线程就是一个会话。同步时用只读 SELECT 加 `BODY.PEEK`，**不会把服务器上的邮件标成已读**；服务器上已读（`\Seen`）的邮件也不计未读。

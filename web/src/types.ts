@@ -1,4 +1,4 @@
-export type Platform = "feishu" | "wechat" | "qq" | "mail";
+export type Platform = "feishu" | "wechat" | "qq" | "discord" | "mail";
 export type SourceState = "ok" | "syncing" | "connecting" | "error" | "disabled";
 export type View = "needs" | "all" | "unread" | "mention" | "p2p" | "group" | "alert";
 

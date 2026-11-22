@@ -4,6 +4,7 @@ export const PLATFORM: Record<Platform, { label: string; color: string; glyph: s
   wechat: { label: "微信", color: "#07C160", glyph: "微" },
   feishu: { label: "飞书", color: "#3370FF", glyph: "飞" },
   qq: { label: "QQ", color: "#12B7F5", glyph: "Q" },
+  discord: { label: "Discord", color: "#5865F2", glyph: "D" },
   mail: { label: "邮件", color: "#E8890C", glyph: "@" },
 };
 

@@ -134,7 +134,7 @@ export function MessagesPage({ onCounts, jumpTo, agentReady = false, onHandoff, 
           <h1>消息</h1>
           {mock && <span className="mock-tag" title="后端未连接，正在展示示例数据">示例数据</span>}
         </div>
-        <p className="page-sub">微信、飞书、QQ、邮件的会话在一处；线上告警单独一栏</p>
+        <p className="page-sub">微信、飞书、QQ、Discord、邮件的会话在一处；告警单独一栏</p>
         {notice && <div className="notice" role="status">{notice}</div>}
         {onOpenApprovals && <ApprovalBanner count={counts?.approvals ?? 0} onOpen={onOpenApprovals} />}
         <div className="tabs" role="tablist">

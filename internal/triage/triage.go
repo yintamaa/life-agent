@@ -121,7 +121,8 @@ func (e *Engine) DetectMention(m *model.Message) {
 			return
 		}
 	}
-	if e.cfg.MentionAll && (strings.Contains(m.Text, "@所有人") || strings.Contains(m.Text, "@all")) {
+	if e.cfg.MentionAll && (strings.Contains(m.Text, "@所有人") || strings.Contains(m.Text, "@all") ||
+		strings.Contains(m.Text, "@everyone") || strings.Contains(m.Text, "@here")) {
 		m.MentionsMe = true
 	}
 }

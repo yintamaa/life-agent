@@ -6,6 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/ProtonMail/go-imap-id v0.0.0-20190926060100-f94a56b9ecde
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	github.com/gorilla/websocket v1.5.3
@@ -22,6 +23,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	modernc.org/libc v1.80.1 // indirect

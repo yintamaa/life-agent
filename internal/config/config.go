@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/yintamaa/life-agent/internal/api"
+	"github.com/yintamaa/life-agent/internal/connector/discord"
 	"github.com/yintamaa/life-agent/internal/connector/feishu"
 	"github.com/yintamaa/life-agent/internal/connector/mail"
 	"github.com/yintamaa/life-agent/internal/connector/qq"
@@ -25,6 +26,7 @@ type Config struct {
 	Feishu  feishu.Config  `yaml:"feishu"`
 	WeChat  wechat.Config  `yaml:"wechat"`
 	QQ      qq.Config      `yaml:"qq"`
+	Discord discord.Config `yaml:"discord"`
 	Mail    []mail.Account `yaml:"mail"`
 	// Node runs agents on the hub machine itself (in-process node).
 	Node NodeConfig `yaml:"node"`

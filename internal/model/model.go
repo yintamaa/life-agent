@@ -6,10 +6,11 @@ import "time"
 
 // Platform identifiers.
 const (
-	PlatformFeishu = "feishu"
-	PlatformWeChat = "wechat"
-	PlatformQQ     = "qq"
-	PlatformMail   = "mail"
+	PlatformFeishu  = "feishu"
+	PlatformWeChat  = "wechat"
+	PlatformQQ      = "qq"
+	PlatformMail    = "mail"
+	PlatformDiscord = "discord"
 )
 
 // Conversation kinds.

@@ -76,3 +76,11 @@ node:                         # 让这台机器跑 Agent（与 hub 同进程）�
     # auto_allow_tools: [Read, Glob, Grep, LS, TodoWrite, WebSearch]
     # auto_allow_bash: ["git status", "git diff", "go test"]
     # deny_bash: ["rm -rf /", "git push --force", "sudo "]
+
+discord:                      # Bot 接入（不使用用户 token：selfbot 违反 Discord 条款）
+  enabled: false
+  token_env: DISCORD_BOT_TOKEN   # Developer Portal → Bot → Reset Token；需开启 MESSAGE CONTENT intent
+  self_user_id: ""            # 你自己的用户 ID（开发者模式 → 复制用户 ID），用于识别"我发的"和 @我
+  guilds: []                  # 可选：只同步这些服务器 ID
+  backfill: 72h
+  send: false

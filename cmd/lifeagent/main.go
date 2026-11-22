@@ -19,6 +19,7 @@ import (
 	"github.com/yintamaa/life-agent/internal/api"
 	"github.com/yintamaa/life-agent/internal/config"
 	"github.com/yintamaa/life-agent/internal/connector"
+	"github.com/yintamaa/life-agent/internal/connector/discord"
 	"github.com/yintamaa/life-agent/internal/connector/feishu"
 	"github.com/yintamaa/life-agent/internal/connector/mail"
 	"github.com/yintamaa/life-agent/internal/connector/qq"
@@ -87,6 +88,9 @@ func run(cfgPath string) error {
 	}
 	if cfg.QQ.Enabled {
 		conns = append(conns, qq.New(cfg.QQ))
+	}
+	if cfg.Discord.Enabled {
+		conns = append(conns, discord.New(cfg.Discord))
 	}
 	for _, a := range cfg.Mail {
 		conns = append(conns, mail.New(a))
