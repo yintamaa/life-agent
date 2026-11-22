@@ -1,12 +1,15 @@
 # life-agent
 
-**个人工作平台：IM 是信息入口，多 Agent 协同是干活的能力。**
+**个人生活大一统的 Agent：你生活里散落各处的信息收进一个中心，自动整理成"今天要关心什么"，再让 Agent 帮你处理。**
 
-- **信息入口**：你的消息散落在微信、飞书、QQ 和好几个邮箱里。life-agent 把它们原样收进一个地方，统一存储、去重和计未读，自动分出"需要看"和"线上告警"，支持跨渠道全文搜索。
-- **干活的能力**：把事情交给 Agent。Agent 跑在你各台机器上，驱动 Claude Code、Codex 等 CLI，带着你的 skills；任务进度和审批在手机、电脑上实时同步。
-- **两者闭环**：消息 → 分拣 → 任务 → Agent 执行 → 起草回复，你确认后发回原会话。
+- **信息都在一个地方**：
+  - 消息：微信、飞书、QQ、Discord、多个邮箱，后续还有 Telegram、iMessage 和短信；
+  - 生活数据：账单、快递、行程、日程、健康、智能家居，规划中。
+- **自动整理**：分拣出"需要看"、@我、告警；从短信和邮件里识别快递取件码、账单、行程、订阅（规划中）；每天一份"今天"简报。
+- **Agent 帮你处理**：任意会话一键"交给 Agent"。Agent 跑在你各台机器上，驱动 Claude Code / Codex，每一步有副作用的操作都等你批准，结果再回到原会话。
+- **一个中心，多端访问**：常开的 Mac 上跑一个 hub，手机、电脑经 Tailscale 访问，界面风格仿 Multica / Linear。
 
-手机和电脑通过一个常驻的 hub 协同使用。界面风格仿 Multica / Linear。待办、日记、账本等模块以后也会建立在这个平台上。
+产品规划（数据源目录、生活场景、优先级）见 [docs/product-life.md](docs/product-life.md)。
 
 ## 和 OpenClaw / Persona / botmux / Multica / HappyClaw 有什么不同
 
@@ -19,7 +22,7 @@
 | HappyClaw | Web 和 8 个 IM 机器人里与 Bot 对话、定时任务 | 和 Bot 的会话 | 只存 Bot 会话 | ✗（都是官方 Bot 通道） | 中重（多用户 Node 单体） |
 | **life-agent** | **全渠道消息**、看板、主 Agent | **完整的 IM 历史和全文搜索** | ✅ | ✅ | 轻 |
 
-我们的切入点是**消息驱动的工作**：任务带着完整的消息上下文进来，做完再回到消息里去。
+其他项目都把 IM 当作给 Agent 下指令的入口；我们把**你的生活数据**当作核心：先汇总、先整理，Agent 是帮你打理的手。工作编排只是其中一块。
 
 - 详细的定位、多端同步对比和借鉴清单：[docs/competitive-analysis.md](docs/competitive-analysis.md)
 - Agent 协同设计（草案）：[docs/design-agents.md](docs/design-agents.md)
@@ -51,6 +54,7 @@
 | 微信 | 读**已解密**的 4.x 本地库镜像（本项目不做解密） | ✅ | — | 轮询，默认 10s | 用伪造的解密库测过 |
 | QQ | OneBot v11 正向 WS（NapCatQQ） | ✅ | ✅（`qq.send`） | 实时推送 | 只编译通过，未测试 |
 | 邮件 | IMAP，多账号；按线程归并为会话 | ✅ | — | 轮询，默认 60s | 只测过解析部分 |
+| Discord | Bot（Gateway 实时 + REST 补拉历史） | ✅ Bot 所在服务器的频道（含历史）、发给 Bot 的私信 | ✅（`discord.send`） | 实时 | 用伪造事件测过，未接真实服务器 |
 
 各渠道的配置步骤、风险和取舍见 [docs/connectors.md](docs/connectors.md)。
 

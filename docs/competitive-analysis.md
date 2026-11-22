@@ -76,6 +76,8 @@
 
 ### life-agent（本项目）：消息是数据，也是工作的起点
 
+> 2026-11-23 再次修订：定位为**个人生活大一统的 Agent**，见 [product-life.md](product-life.md)。和 Persona 相比，更重要的差异是"生活"能力：数据源要多要全（消息、短信、账单、快递、行程、健康、智能家居），并且自动整理出生活场景。工作编排是其中一块，不是全部。
+>
 > 2026-11-19 修订：定位从"个人消息数据层"扩展为**个人工作平台**，即 IM 信息入口加上多 Agent 协同。Agent 这一侧的设计见 [design-agents.md](design-agents.md)。
 >
 > 这样一来，Persona、botmux、Multica、HappyClaw 在 Agent 这部分就成了直接竞品。我们和它们的区别不在"要不要 Agent"，而在**任务从哪来、Agent 能拿到什么上下文**：
@@ -195,7 +197,89 @@
 - botmux 每个流单独建一条隧道连接。
 - 设备签名配对：在单用户 + Tailscale 访问控制下，收益小于成本。
 
-## 5. 参考资料
+## 5. 中心节点与连接方式
+
+### 5.1 谁有中心
+
+几家都有中心，区别在**中心存什么、机器怎么连上来**。botmux 是例外：单机时它没有自己的中心，飞书本身充当了中心。
+
+| | 有没有中心 | 中心存什么 | 机器 / 设备怎么连中心 | 中心挂了会怎样 |
+|---|---|---|---|---|
+| OpenClaw | 有：Gateway，一台主机一个 | 会话、消息路由、所有 IM 渠道连接 | 设备主动连 Gateway 的 WS（默认只监听本机 18789，跨设备走 Tailscale 或 SSH） | 全部不可用；不支持多个 Gateway 互联 |
+| Persona | 有：hub | 设备、收件箱、Agent 会话元数据（Postgres）；对话正文留在各电脑 | 设备连 hub；电脑默认主动连 hub（也支持 hub 去连电脑，或走 SSH） | 手机端不可用；电脑上的 Agent 照常跑 |
+| Multica | 有：服务端（Go + Postgres，可自托管，也可用官方云） | issue、任务、Agent 配置、运行记录 | 机器上的 daemon 登记本机有哪些 CLI，然后每 3 秒轮询领任务 | 派不了新任务 |
+| botmux | 单机没有，飞书就是中心；多台机器时可加 platform | platform 只存机器、用户、团队元数据，不存消息 | daemon 通过反向隧道主动连 platform | 单机照常运行，只是失去远程入口 |
+| HappyClaw | 有：Node 服务本身 | 会话、工作区、用户 | 没有远程机器，只能单机执行 | 全部不可用 |
+| life-agent | 有：hub | 全部 IM 正文、任务、审批 | 设备经 Tailscale 访问；其它机器的 node 主动连 hub，事件写本地 outbox，断线后续传 | 手机端不可用；node 上的任务继续跑，事件留在本地等 hub 恢复 |
+
+规律是：**中心调度、存状态，执行放在各台机器上，并且总是机器主动连中心。** 原因是执行机器（公司电脑、家里的 Mac）都在 NAT 或防火墙后面，中心连不进去。
+
+### 5.2 "反向"不特殊，特殊的是连接里传什么
+
+Persona、Multica、botmux 和我们的 node，都是执行机器主动连中心，所以"反向"并不是 botmux 独有的。真正的区别在于连接里传的是什么：
+
+- **Persona / Multica / life-agent：传业务指令，中心听得懂。** 例如"在 tos 仓库跑任务 t123""t123 要执行 git push，请审批"。中心知道有哪些任务、跑到哪一步，于是能在一个界面里汇总所有机器的任务。
+- **botmux-platform：传原始网络流量，只管转发。** 相当于自建的 ngrok 或 Cloudflare Tunnel，外加飞书登录：
+  - 每台机器自带网页 Dashboard（`localhost:7891`），platform 负责让你在外面也能打开它；
+  - 每台机器一个子域名，`m-<id>` 是 Dashboard，`t-<id>` 是终端；
+  - 打开时，platform 通过控制连接通知 daemon，daemon 再连一条数据连接，浏览器的请求按字节原样转发过去。
+
+```
+① 启动时：   机器 A 的 daemon ──主动连──► platform（控制连接，一直保持）
+② 你打开 m-机器A.platform.com → platform 飞书登录校验 → 通过控制连接通知 A
+③           机器 A ──再连一条数据连接──► platform
+④ 浏览器请求 ⇄ platform 原样转发 ⇄ 数据连接 ⇄ 机器 A 的 localhost:7891
+```
+
+### 5.3 为什么我们的中心必须理解业务
+
+设想晚上 11 点你躺在床上，用手机想知道三件事：一共几条要处理？有没有 Agent 在等审批？上周谁说过"bucket 限流"？
+
+| | 只做转发的中心 | 理解业务的中心 |
+|---|---|---|
+| 一共几条要处理 | ✗ 要逐台打开各机器的页面，自己加起来 | ✅ 一个数字 |
+| 有 Agent 在等审批 | ✗ 要逐台去看；管子不知道里面是审批，**没法推送提醒** | ✅ 审批一出现就推到手机 |
+| 跨机器搜索 | ✗ 每台机器各搜一遍 | ✅ 一次搜完 |
+| 某台机器休眠了 | ✗ 它的数据完全看不到 | ✅ 已同步的照样能看 |
+
+"汇总、计数、提醒、搜索、统一审批"都要求有一个地方看得懂内容。botmux 不需要，是因为飞书替它做了汇总；而我们的数据来自多个 IM 和生活数据源，没有现成的 App 能替我们汇总。这就是第 3 节记录的"中心化 dashboard"原则。
+
+## 6. 公司数据存在哪：各家怎么做
+
+背景：hub 放在个人的常开 Mac 上，公司飞书的聊天正文要不要存到 hub？
+
+| | 消息全文存在哪 | 中心存什么 | 更接近 |
+|---|---|---|---|
+| OpenClaw | Gateway 所在机器 | 你和 AI 助手的对话（每个 Agent 一个 SQLite）；iMessage 由 Gateway 经 SSH 到 Mac 上读取后汇总 | A，但只存和 AI 的对话 |
+| Persona | 各电脑本地 | 收件箱条目和小模型摘要，一个会话一条待处理项，不存 IM 正文；Agent 正文看的时候由 node 实时转发，不入库 | **B + 摘要** |
+| botmux | 飞书本身 | 本机只存会话状态，platform 只存元数据；从不复制消息 | 比 B 更彻底：不复制，直接用飞书当界面 |
+| Multica | 服务端 | issue、任务、运行记录；飞书和 Slack 只发通知 | 不涉及 |
+| HappyClaw | 它自己的服务端 | 已绑定会话里你和 Bot 的对话全文；WhatsApp 个人号的历史被主动丢弃 | A，但只存和 Bot 的对话 |
+
+观察：
+
+1. **没有一家会把公司聊天全文镜像到个人设备。** 存全文的几家（OpenClaw、HappyClaw）存的都是你主动发给 AI 的内容。
+2. **和我们最接近的 Persona 选了 B**：中心只存"要不要你处理、一句话摘要、哪一档"，正文留在源头。
+3. **botmux 合规上最干净**：数据不搬家，代价是只能围绕飞书来做。
+4. **"把你和别人的全部聊天汇总到个人中心"没有先例可抄**，这既是我们的差异点，也是合规风险点。
+
+我们的两个方案：
+
+| | 方案 A：全文存 hub | 方案 B：全文留工作电脑，hub 只存元数据（可选摘要） |
+|---|---|---|
+| dashboard 能看到"需要看"、@我、告警 | ✅ | ✅ |
+| 工作电脑关机时能看飞书正文 | ✅ | ✗ |
+| 搜飞书消息 | ✅ 随时 | 要等工作电脑在线，由 node 在本地搜 |
+| 合规风险 | 较高 | 低 |
+| 实现 | 简单 | 复杂 |
+
+当前倾向是**按数据来源分级**（待最终确认）：
+- 微信、QQ、个人邮件、Discord 等个人数据走 A，全量汇总；
+- 公司飞书走 B，加可选摘要。摘要要把正文发给模型，做成开关。
+
+这样 dashboard 依然是中心，只是公司正文不落在个人设备上。
+
+## 7. 参考资料
 
 - OpenClaw 文档：[Architecture](https://docs.openclaw.ai/concepts/architecture)、[Remote access](https://docs.openclaw.ai/gateway/remote)、[Tailscale](https://docs.openclaw.ai/gateway/tailscale)
 - Persona：[README](https://github.com/daidr/persona)；源码中的 `docs/server/architecture.md`、`docs/protocol/protocol.md`、`docs/assistant/inbox.md`、`docs/operations/network.md`
