@@ -146,6 +146,7 @@ func New(cfg Config, hub Hub, selfExe string) (*Node, error) {
 	}
 	cfg.DataDir = expandHome(cfg.DataDir)
 	cfg.Approval = cfg.Approval.withDefaults()
+	cfg.Claude.Path, cfg.Codex.Path = expandHome(cfg.Claude.Path), expandHome(cfg.Codex.Path)
 	n := &Node{cfg: cfg, hub: hub, runtimes: map[string]agent.Runtime{},
 		sessions: map[string]*session{}, pending: map[string]chan hookResponse{}}
 	if cfg.Claude.Enabled {

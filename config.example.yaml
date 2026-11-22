@@ -65,7 +65,7 @@ auth:                         # 多端访问：hub 保持 127.0.0.1，前面挂 
 node:                         # 让这台机器跑 Agent（与 hub 同进程）；其它机器用 `lifeagent node` 接入（见 docs/design-agents.md）
   enabled: false
   name: mac-mini
-  claude_code: { enabled: true, path: claude }
+  claude_code: { enabled: true, path: claude }   # 推荐原生安装（~/.local/bin/claude）；也可写绝对路径或 ~/ 开头的路径
   codex: { enabled: true, path: codex }    # Codex 无交互模式不能逐步审批，靠 workspace-write 沙箱兜底
   workspaces:                 # Agent 只能在这些目录里干活
     - name: life-agent

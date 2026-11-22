@@ -4,7 +4,7 @@ hub_url: https://mac-mini.your-tailnet.ts.net:8443   # hub 前面的 tailscale s
 token: "与 hub 的 auth.tokens 之一相同"
 name: work-laptop
 data_dir: ~/.life-agent/node     # outbox（断线续传）与 worktree 存放处
-claude_code: { enabled: true, path: claude }
+claude_code: { enabled: true, path: claude }   # 推荐原生安装（~/.local/bin/claude）；launchd 下请确认 PATH 包含 ~/.local/bin
 codex: { enabled: true, path: codex }
 workspaces:
   - name: tos
