@@ -24,7 +24,7 @@ while [ "$i" -lt "$n" ]; do
   repo="$(jq -r ".competitors[$i].repo" "$list")"
   rev="$(jq -r ".competitors[$i].reviewed_commit" "$list")"
   since="$(jq -r ".competitors[$i].reviewed_at" "$list")"
-  track="$(jq -r ".competitors[$((i))].track // true" "$list")"
+  track="$(jq -r "if .competitors[$i].track == false then \"false\" else \"true\" end" "$list")"
   i=$((i + 1))
   if [ -n "$only" ] && [ "$only" != "$name" ]; then continue; fi
   if [ -z "$only" ] && [ "$track" = "false" ]; then continue; fi
