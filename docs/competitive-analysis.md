@@ -10,6 +10,7 @@
 > | [botmux-platform](https://github.com/botmux-ai/botmux-platform) | `bd7faf3`（v0.1.0） |
 > | [HappyClaw](https://github.com/riba2534/happyclaw) | `d90e9d9`（2026-11-20） |
 > | [Multica](https://github.com/multica-ai/multica) | 仅作界面参考 |
+| [herdr](https://github.com/herdrdev/herdr) | `e8d7d97`（v0.9.5，2026-11-23 本机安装实测；本文中唯一实际运行过的项目） |
 
 ## 1. 定位：大家在解决不同的问题
 
@@ -127,6 +128,30 @@
 ### Multica：任务看板，不涉及 IM 聚合
 
 把编码 Agent 当队友，分配 issue、跟踪进度。我们只借鉴它 Linear 风格的界面，不借鉴产品定位。
+
+### herdr：编码 Agent 的终端运行时（不是竞品，是可选的底座）
+
+> 2026-11-23 用官方安装脚本装到 `~/.local/bin`（macOS 14 上 Homebrew 已不提供 bottle，源码编译又报错），在独立的 `probe` session 里无头实测，测完已删除。
+
+- **要解决的问题**：在一个终端里同时管很多个编码 Agent。
+  - 布局和 tmux 类似，分 workspace、tab、pane 三层；server 常驻后台，关掉客户端或断开 SSH，Agent 照样在跑。
+  - 可以把多台 SSH 机器放进同一个窗口。
+  - Rust 单二进制，22 MB，Apache-2.0 许可。
+- **核心能力**：认出 pane 里跑的是哪种 Agent（支持 24 种），并标出 working / blocked / idle / done。Agent 停下来等人时，马上能看到是哪一个。
+- **实现方式是读屏。**
+  - 每种 Agent 一份 TOML 规则，匹配 OSC 标题、底部几行的正则和提示框区域。
+  - 规则从 `herdr.dev/agent-detection/` 单独下发，带版本号。Agent 的 UI 改版时只更新规则，不用发新版本程序。
+  - `agent explain` 会给出命中的是哪条规则，以及作为证据的屏幕文本。
+- **实测结果**：
+  - Claude Code 启动时弹出目录信任框，`agent start` 立刻返回 `agent_not_ready`，状态为 `blocked`，判断正确。
+  - `agent prompt --wait` 先观察到 working，再等到 idle 才返回，一次往返约 11 秒；`agent read` 能读回回复内容。
+  - 停掉 server 再启动：workspace、pane 和 cwd 都恢复了，Claude 进程没有恢复，会话也没续上。要续会话，得先运行 `herdr integration install claude`，往 `~/.claude/settings.json` 装一个上报 session id 的 hook，恢复时再由 herdr 在 pane 里敲 `claude --resume <id>`。这一步要改全局配置，本次没装。
+  - 程序对外只连两处：更新清单 `herdr.dev/latest.json` 和识别规则清单。源码里没有遥测。
+- **和我们的关系**：
+  - 我们的 node 用 `claude -p --output-format stream-json` 和 `codex exec --json` 无头驱动 Agent，状态来自结构化事件，比读屏可靠，也不受 UI 改版影响。代价是人没法中途接手，想接着聊只能 `--resume` 另开一轮。
+  - herdr 正好反过来：Agent 跑在真终端里，人随时可以 attach 进去接手，状态则靠读屏推断。
+  - Persona 在 node 下面用的就是 herdr 这一层（见上文）。
+- **一句话**：**靠读屏识别 Agent 状态的终端复用器**。适合人和 Agent 轮流使用同一个会话，不适合当无人值守的执行引擎。
 
 ### life-agent（本项目）：消息是数据，也是工作的起点
 
@@ -271,6 +296,8 @@
 | 14 | 从消息生成任务的分级：发送者在不在名单 × 是否 @我，分成明确 / 推断 / 忽略三档；配 observe（只建议）/ auto（自动派）两档 | HappyClaw 团队模式准入表 | 计划中（规则触发任务时采用） |
 | 15 | 粗粒度审批：任务先只读运行，审批通过后才放开写权限 | HappyClaw work item | 计划中（作为"告警诊断"这类自动任务的默认档） |
 | 16 | QQ 被动回复额度（带入站 msg_id、5 分钟内、最多 4 次）与微信 `context_token` 的生命周期处理 | HappyClaw | 仅供参考：我们走 NapCat，不受官方 Bot 额度限制 |
+| 24 | 可选的"交互式"任务：Agent 跑在 herdr 的 pane 里，node 通过 socket API 发 prompt、读状态；手机上看进度，回到电脑前直接 attach 接手 | herdr（Persona 的用法） | 待评估（和现有无头模式并存，不替换） |
+| 25 | 识别规则与程序分开发版：Agent 的 UI 改版时只更新规则文件；每次判定都能说出命中的规则和证据 | herdr agent-detection | 仅供参考：我们用结构化输出，不读屏；做交互式任务时再用 |
 
 明确**不采纳**的：
 - Persona 只在内存保留 15 分钟的事件日志：我们的数据本来就落库，用游标更可靠。
@@ -387,4 +414,5 @@ Persona、Multica、botmux 和我们的 node，都是执行机器主动连中心
 - Persona：[README](https://github.com/nwverse/persona)（真正的上游）；`docs/feature-map.md`、`docs/assistant/inbox.md`、`docs/assistant/knowledge.md`、`docs/assistant/health.md`、`docs/apple/phone-tools.md`、`docs/extensions/lark-migration.md`、`docs/assistant/unified-entry.md`；源码中的 `docs/server/architecture.md`、`docs/protocol/protocol.md`、`docs/assistant/inbox.md`、`docs/operations/network.md`
 - botmux：[文档站](https://deepcoldy.github.io/botmux/)；platform 的 [v0.1.0 release](https://github.com/botmux-ai/botmux-platform/releases/tag/v0.1.0)
 - HappyClaw：[README](https://github.com/riba2534/happyclaw)；源码中的 `docs/RUNTIME-ARCHITECTURE.md`、`docs/ACL-MATRIX.md`、`src/wechat.ts`、`src/qq.ts`、`src/feishu.ts`、`container/agent-runner/src/index.ts`
+- herdr：[README](https://github.com/herdrdev/herdr)、[socket API](https://herdr.dev/docs/socket-api/)、`herdr --skill` 输出的 Agent 使用说明；源码中的 `src/agent_resume.rs`、`src/integration/`；本机规则文件 `~/.local/state/herdr/agent-detection/remote/claude.toml`
 - 微信接入现状：`sjzar/chatlog` 已于 2025-10 收到官方函件后删除代码，详见 [docs/connectors.md](connectors.md)
