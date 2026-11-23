@@ -5,8 +5,8 @@
     {
       "name": "persona",
       "repo": "https://github.com/nwverse/persona",
-      "reviewed_commit": "4aaef55",
-      "reviewed_at": "2026-11-09",
+      "reviewed_commit": "9b5038a67",
+      "reviewed_at": "2026-11-23",
       "note": "daidr/persona 是停更的镜像，真正的上游是 nwverse",
       "priority": "primary"
     },

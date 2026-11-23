@@ -16,7 +16,7 @@
 | | 任务从哪来 | Agent 拿得到的上下文 | 存 IM 正文 | 微信 / QQ 聊天记录 | 重量 |
 |---|---|---|---|---|---|
 | OpenClaw | IM 私聊汇入一个 AI 助手 | 和助手的对话 | 只存 AI 对话 | ✗ | 重 |
-| Persona | 和主 Agent 对话 | Inbox 摘要、连接器 | ✗ | ✗ | 重 |
+| Persona | 和主 Agent 对话；Inbox | Inbox 分诊上下文、知识库（按天存全文，回填需审批） | 知识库存（365 天） | ✗（微信只有 iLink bot，没有 QQ） | 重 |
 | botmux | 飞书话题（一个话题一个 CLI） | 当前话题 | ✗（留在飞书） | ✗ | 中 |
 | Multica | issue 看板 | issue 内容 | ✗ | ✗ | 中重 |
 | HappyClaw | Web 和 8 个 IM 机器人里与 Bot 对话、定时任务 | 和 Bot 的会话 | 只存 Bot 会话 | ✗（都是官方 Bot 通道） | 中重（多用户 Node 单体） |
