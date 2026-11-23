@@ -152,7 +152,17 @@
   - 识别的三路信号都绑在 herdr 自己分配的 PTY 上：pane 子进程的前台进程组（`src/pane.rs` 的 `probe_foreground_process`）、这个 PTY 的屏幕缓冲区（`src/detect/`）、以及 hook 上报。herdr 不扫描本机进程，也没有 adopt、attach 外部进程之类的命令。
   - 装了 integration 也没用：Claude 的 hook 脚本开头就检查 `HERDR_ENV=1`、`HERDR_SOCKET_PATH`、`HERDR_PANE_ID`，缺一个就 `exit 0`（`src/integration/assets/claude/herdr-agent-state.sh`）。这些变量只有 herdr 在 pane 里起进程时才注入，所以在 iTerm 或 VS Code 里启动的 `claude` 发出的上报会被直接丢掉。
   - 想纳管，只能在 herdr 的 pane 里重新起：先退出原来的进程，再在 pane 里 `claude --resume <id>`，会话可以续上。正在跑的那一轮没法无损迁移，因为 PTY 的控制端换不了（reptyr 一类工具在 macOS 上不可用）。
-  - 对我们的启发：想覆盖"用户自己在终端里开的 Agent"，靠接管 PTY 走不通，得靠全局 hook，也就是在 `~/.claude/settings.json` 里装一个不依赖父进程环境变量的上报 hook，按 session id、cwd、pid 认 Agent。这样只能看状态、做审批，发不了键。
+  - 对我们的启发：想覆盖"用户自己在终端里开的 Agent"，靠接管 PTY 走不通，要换别的信号源。
+- **改代码能做到哪一步**（2026-11-23 本机核实，macOS 14，SIP 开启，Claude Code 2.1.330）：
+  - **发现和粗状态，现成就有。** Claude Code 自己维护一份本机会话登记：每个交互式进程写一份 `~/.claude/sessions/<pid>.json`，里面有 `sessionId`、`cwd`、`status`（实测见到 `busy` 和 `idle`）、`updatedAt`，还有一个 `messagingSocketPath`（`/tmp/cc-socks/<pid>.sock`）。不管在哪个终端里启动都会写，pid 还活着就说明会话还在。这是未公开的内部格式，随版本可能变，读的时候要容错。
+  - **"在等我审批"要靠 hook。** 登记里没看到 blocked 这种状态，得在全局 `~/.claude/settings.json` 里装 `Notification`、`PreToolUse` hook，按 session id 上报，并且不能像 herdr 那样要求 `HERDR_PANE_ID`。
+  - **往里发消息**：
+    - Claude Code 跨会话互发消息（SendMessage）走的就是那个 socket，协议没公开，第三方去逆向容易被版本升级打断。
+    - 退一步可以用终端自己的接口：tmux `send-keys`、iTerm2 的 API 或 AppleScript、Terminal.app 的 AppleScript。VS Code 内置终端没有这类接口。
+    - 直接往 `/dev/ttysNNN` 写只会显示在屏幕上，不会变成输入。`TIOCSTI` 注入按键要求那个 tty 是调用方的控制终端，否则得有 root。
+  - **原样接管做不到。** Linux 上 reptyr 靠 ptrace 往目标进程里注入系统调用来换 PTY，macOS 开着 SIP 时拿不到别的进程的 task port，这条路不通。
+  - **可行的"一键接管"**：等登记里的 `status` 变成 `idle`，取出 `sessionId` 和 `cwd`，结束原进程，在 herdr 的 pane 里 `cd <cwd> && claude --resume <sessionId>`。herdr 的 `src/agent_resume.rs` 已经有生成 resume 命令的逻辑，改动量不大。代价是原来那个终端窗口里的进程会退出，而且只能在 idle 时做。
+  - **改 herdr 的难点**：herdr 的数据模型假设每个 pane 都有自己的 PTY（`src/pane.rs` 的 `PaneRuntimeIo`），要显示"不归它管、只读"的外部会话，就得加一种新实体，牵扯 UI、socket API 和持久化。上游提交非常频繁，fork 维护成本高。这件事放在我们自己的 node 里做（读登记目录加全局 hook）更合适。
 - **和我们的关系**：
   - 我们的 node 用 `claude -p --output-format stream-json` 和 `codex exec --json` 无头驱动 Agent，状态来自结构化事件，比读屏可靠，也不受 UI 改版影响。代价是人没法中途接手，想接着聊只能 `--resume` 另开一轮。
   - herdr 正好反过来：Agent 跑在真终端里，人随时可以 attach 进去接手，状态则靠读屏推断。
