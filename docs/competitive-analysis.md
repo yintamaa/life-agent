@@ -5,7 +5,7 @@
 > | 项目 | 分析版本 |
 > |---|---|
 > | [OpenClaw](https://github.com/openclaw/openclaw) | `6b5bc83ae` |
-> | [Persona](https://github.com/daidr/persona) | `4aaef55`；Inbox 部分参考了更新约 40 个提交的上游分支 |
+> | [Persona](https://github.com/nwverse/persona) | `4aaef55`（2026-11-09，当时误用了停更镜像 daidr/persona；正在按最新上游复核，见第 7 节） |
 > | [botmux](https://github.com/deepcoldy/botmux) | `697de2f` |
 > | [botmux-platform](https://github.com/botmux-ai/botmux-platform) | `bd7faf3`（v0.1.0） |
 > | [HappyClaw](https://github.com/riba2534/happyclaw) | `d90e9d9`（2026-11-20） |
@@ -279,7 +279,21 @@ Persona、Multica、botmux 和我们的 node，都是执行机器主动连中心
 
 这样 dashboard 依然是中心，只是公司正文不落在个人设备上。
 
-## 7. 参考资料
+## 7. 跟踪机制
+
+几个竞品迭代极快：Persona 每天 300～470 个提交，OpenClaw 每天约 280 个。只分析一次快照，很快就会过时。
+
+> 教训（2026-11-23）：最初分析的 `daidr/persona` 其实是一个 11-09 起就停更的镜像，真正的上游是 `nwverse/persona`。两周后复查时，已经落后 5,515 个提交，期间 Persona 大举进入了健康、位置、日历等"生活"领域。
+
+- **清单**：`docs/research/competitors.json`，记录每个竞品**真正的上游**、上次复核的提交和日期。
+- **检查**：`scripts/track-competitors.sh [名字]`。它只拉提交历史，不检出、也不运行竞品代码，然后报告：
+  - 落后多少个提交、每天多少个；
+  - 和我们相关方向的提交（Inbox、各 IM、生活数据、推送、同步、节点、审批）；
+  - 落后超过 200 个提交时提示重新复核。
+- **复核**：按本文的维度重新分析，更新对应章节，把清单里的 `reviewed_commit` / `reviewed_at` 改成当时分析的版本，一起提交。
+- **节奏**：建议每周跑一次；Persona、OpenClaw 落后超过 200 个提交时优先复核。
+
+## 8. 参考资料
 
 - OpenClaw 文档：[Architecture](https://docs.openclaw.ai/concepts/architecture)、[Remote access](https://docs.openclaw.ai/gateway/remote)、[Tailscale](https://docs.openclaw.ai/gateway/tailscale)
 - Persona：[README](https://github.com/daidr/persona)；源码中的 `docs/server/architecture.md`、`docs/protocol/protocol.md`、`docs/assistant/inbox.md`、`docs/operations/network.md`
