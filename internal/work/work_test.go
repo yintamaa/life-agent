@@ -171,3 +171,63 @@ func TestApprovalsExpireWhenTurnEnds(t *testing.T) {
 		t.Fatalf("badge count %d", pending)
 	}
 }
+
+func TestPresetsAndNotices(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tri, _ := triage.New(triage.Config{})
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), tri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m := New(st)
+	m.Presets = []Preset{
+		{Name: "dev", Title: "开发", Node: "mac", Workspace: "repo", Runtime: "claude-code", Instructions: "保持实现精简"},
+		{Name: "tos", Title: "TOS", Node: "laptop", Workspace: "tos", Runtime: "claude-code"},
+	}
+	var mu sync.Mutex
+	var notices []Notice
+	m.OnNotice = func(n Notice) { mu.Lock(); notices = append(notices, n); mu.Unlock() }
+
+	n, err := node.New(node.Config{Name: "mac", DataDir: t.TempDir(), Workspaces: []node.Workspace{{Name: "repo", Path: t.TempDir()}},
+		Approval: node.Policy{Timeout: 10 * time.Second}}, m, "/bin/true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := &fakeRT{}
+	n.RegisterRuntime(rt)
+	go n.Serve(ctx)
+	time.Sleep(100 * time.Millisecond)
+	m.Attach(LocalLink{N: n})
+
+	agents := m.Agents(ctx)
+	if len(agents) != 2 || !agents[0].Available || agents[1].Available || agents[1].Reason == "" {
+		t.Fatalf("agents %+v", agents)
+	}
+	if _, err := m.Create(ctx, CreateReq{Agent: "nope", Instruction: "x"}); err == nil {
+		t.Fatal("unknown preset must fail")
+	}
+	task, err := m.Create(ctx, CreateReq{Agent: "dev", Instruction: "修个 bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Agent != "dev" || task.Node != "mac" || task.Workspace != "repo" {
+		t.Fatalf("preset not applied: %+v", task)
+	}
+	rt.mu.Lock()
+	prompt := rt.specs[0].Prompt
+	rt.mu.Unlock()
+	if !strings.Contains(prompt, "## 你的设定\n保持实现精简") {
+		t.Fatalf("standing instructions missing:\n%s", prompt)
+	}
+	waitStatus(t, st, task.ID, store.TaskWaiting)
+	pend, _ := st.ListApprovals(ctx, task.ID, true)
+	_, _ = m.Decide(ctx, pend[0].ID, true, "phone")
+	waitStatus(t, st, task.ID, store.TaskIdle)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(notices) != 2 || notices[0].Kind != "approval" || notices[0].ID != pend[0].ID || notices[1].Kind != "task_done" || notices[1].TaskID != task.ID {
+		t.Fatalf("notices %+v", notices)
+	}
+}

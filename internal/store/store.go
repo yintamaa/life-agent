@@ -118,6 +118,11 @@ func Open(path string, tri *triage.Engine) (*Store, error) {
 	if err := s.migrateTasks(); err != nil {
 		return nil, fmt.Errorf("migrate tasks: %w", err)
 	}
+	if err := s.migratePush(); err != nil {
+		return nil, fmt.Errorf("migrate push: %w", err)
+	}
+	// Additive column migrations (ignore "duplicate column" on existing DBs).
+	_, _ = db.Exec(`ALTER TABLE tasks ADD COLUMN agent TEXT NOT NULL DEFAULT ''`)
 	cur, err := s.CommittedSeq(context.Background())
 	if err != nil {
 		return nil, err

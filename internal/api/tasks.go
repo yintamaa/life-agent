@@ -14,6 +14,11 @@ import (
 
 func (s *Server) registerWork(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes", s.nodes)
+	mux.HandleFunc("GET /api/agents", func(w http.ResponseWriter, r *http.Request) {
+		if s.workOK(w) {
+			writeJSON(w, s.Work.Agents(r.Context()))
+		}
+	})
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/tasks/{id}", s.getTask)

@@ -84,3 +84,21 @@ discord:                      # Bot 接入（不使用用户 token：selfbot 违
   guilds: []                  # 可选：只同步这些服务器 ID
   backfill: 72h
   send: false
+
+agents:                       # Agent 预设：手机上派活只需选一个名字（需要对应 node 在线）
+  - name: life-agent-dev
+    title: life-agent 开发
+    node: mac-mini
+    workspace: life-agent
+    runtime: claude-code
+    instructions: |
+      你在维护 life-agent 仓库。改动前先读 README 和相关 docs；保持实现精简，不引入不必要的依赖；完成后跑 make test。
+  # - name: tos-dev
+  #   title: TOS 开发
+  #   node: work-laptop       # 公司代码只在工作电脑上读写
+  #   workspace: tos
+  #   runtime: claude-code
+
+push:                         # Web Push：Agent 需要审批 / 任务完成时通知手机（iOS 需"添加到主屏幕"并经 HTTPS 访问）
+  disabled: false
+  # subject: mailto:you@example.com

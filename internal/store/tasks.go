@@ -71,6 +71,7 @@ const (
 type Task struct {
 	ID               string    `json:"id"`
 	Title            string    `json:"title"`
+	Agent            string    `json:"agent"` // preset name, "" = custom
 	Instruction      string    `json:"instruction"`
 	Status           string    `json:"status"`
 	Node             string    `json:"node"`
@@ -123,9 +124,9 @@ func (s *Store) CreateTask(ctx context.Context, t Task) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	now := time.Now().UnixMilli()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks (id, title, instruction, status, node, workspace, runtime, model, conversation_id, created_at, updated_at, change_seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Title, t.Instruction, t.Status, t.Node, t.Workspace, t.Runtime, t.Model, t.ConversationID, now, now, s.nextSeq())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks (id, title, agent, instruction, status, node, workspace, runtime, model, conversation_id, created_at, updated_at, change_seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Title, t.Agent, t.Instruction, t.Status, t.Node, t.Workspace, t.Runtime, t.Model, t.ConversationID, now, now, s.nextSeq())
 	if err == nil {
 		s.changed("tasks")
 	}
@@ -185,13 +186,13 @@ func (s *Store) updateTaskLocked(ctx context.Context, ex execer, id string, p Ta
 	return nil
 }
 
-const taskCols = `t.id, t.title, t.instruction, t.status, t.node, t.workspace, t.runtime, t.model, t.conversation_id, t.session_id, t.workdir, t.result, t.error, t.cost_usd, t.created_at, t.updated_at,
+const taskCols = `t.id, t.title, t.agent, t.instruction, t.status, t.node, t.workspace, t.runtime, t.model, t.conversation_id, t.session_id, t.workdir, t.result, t.error, t.cost_usd, t.created_at, t.updated_at,
   (SELECT COUNT(*) FROM approvals a WHERE a.task_id = t.id AND a.status = 'pending' AND a.expires_at > ?)`
 
 func scanTask(sc interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var created, updated int64
-	err := sc.Scan(&t.ID, &t.Title, &t.Instruction, &t.Status, &t.Node, &t.Workspace, &t.Runtime, &t.Model, &t.ConversationID,
+	err := sc.Scan(&t.ID, &t.Title, &t.Agent, &t.Instruction, &t.Status, &t.Node, &t.Workspace, &t.Runtime, &t.Model, &t.ConversationID,
 		&t.SessionID, &t.Workdir, &t.Result, &t.Error, &t.CostUSD, &created, &updated, &t.PendingApprovals)
 	t.CreatedAt, t.UpdatedAt = fromMS(created), fromMS(updated)
 	return t, err

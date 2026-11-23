@@ -25,6 +25,7 @@ import (
 	"github.com/yintamaa/life-agent/internal/connector/qq"
 	"github.com/yintamaa/life-agent/internal/connector/wechat"
 	"github.com/yintamaa/life-agent/internal/node"
+	"github.com/yintamaa/life-agent/internal/push"
 	"github.com/yintamaa/life-agent/internal/store"
 	"github.com/yintamaa/life-agent/internal/triage"
 	"github.com/yintamaa/life-agent/internal/work"
@@ -116,6 +117,16 @@ func run(cfgPath string) error {
 	// Agent orchestration: the hub always has a task manager; remote nodes can
 	// attach later. The hub machine itself can also run agents (in-process node).
 	srv.Work = work.New(st)
+	srv.Work.Presets = cfg.Agents
+	if !cfg.Push.Disabled {
+		ps, err := push.New(st, cfg.DataDir, cfg.Push.Subject)
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+		srv.Push = ps
+		go ps.Run(ctx)
+		srv.Work.OnNotice = func(n work.Notice) { ps.Notify(noticeToPush(n)) }
+	}
 	if cfg.Node.Enabled {
 		exe, err := os.Executable()
 		if err != nil {
@@ -217,4 +228,25 @@ func runNode(path string) error {
 		return err
 	}
 	return nil
+}
+
+// noticeToPush turns a work notice into a device notification. Approvals are
+// urgent and carry allow/deny actions; the tag makes a newer notice for the
+// same task replace the older one instead of piling up.
+func noticeToPush(n work.Notice) push.Notification {
+	switch n.Kind {
+	case "approval":
+		return push.Notification{
+			Title: "需要审批 · " + n.Title, Body: n.Body, Kind: n.Kind, Urgent: true,
+			Tag: "approval-" + n.ID, URL: "#/todo?t=" + n.TaskID,
+			Data:    map[string]string{"approval_id": n.ID, "task_id": n.TaskID},
+			Actions: []push.Action{{Action: "allow", Title: "允许"}, {Action: "deny", Title: "拒绝"}},
+		}
+	case "task_failed":
+		return push.Notification{Title: "任务失败 · " + n.Title, Body: n.Body, Kind: n.Kind, Tag: "task-" + n.TaskID,
+			URL: "#/todo?t=" + n.TaskID, Data: map[string]string{"task_id": n.TaskID}}
+	default:
+		return push.Notification{Title: "任务完成 · " + n.Title, Body: n.Body, Kind: n.Kind, Tag: "task-" + n.TaskID,
+			URL: "#/todo?t=" + n.TaskID, Data: map[string]string{"task_id": n.TaskID}}
+	}
 }

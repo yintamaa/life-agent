@@ -29,9 +29,34 @@ type NodeLink interface {
 	Decide(ctx context.Context, approvalID string, allow bool, reason string) error
 }
 
+// Preset is a named agent: where it runs, with which CLI, plus standing
+// instructions. Defined in config.yaml (no DB, no CRUD UI — keep it small).
+type Preset struct {
+	Name         string `yaml:"name" json:"name"`   // slug, e.g. "tos-dev"
+	Title        string `yaml:"title" json:"title"` // display, e.g. "TOS 开发"
+	Node         string `yaml:"node" json:"node"`
+	Workspace    string `yaml:"workspace" json:"workspace"`
+	Runtime      string `yaml:"runtime" json:"runtime"`
+	Model        string `yaml:"model" json:"model,omitempty"`
+	Instructions string `yaml:"instructions" json:"instructions,omitempty"`
+}
+
+// Notice is something devices should be told about (push notifications).
+type Notice struct {
+	Kind   string // approval | task_done | task_failed
+	TaskID string
+	Title  string
+	Body   string
+	ID     string // approval id for approvals
+}
+
 // Manager implements node.Hub and the task API.
 type Manager struct {
-	store *store.Store
+	store   *store.Store
+	Presets []Preset
+	// OnNotice, if set, is called (async-safe, must not block) for events a
+	// person should hear about even when no page is open.
+	OnNotice func(Notice)
 
 	mu    sync.RWMutex
 	nodes map[string]NodeLink
@@ -106,8 +131,50 @@ func (m *Manager) Nodes(ctx context.Context) []NodeStatus {
 	return out
 }
 
+// AgentStatus is a preset plus whether it can take work right now.
+type AgentStatus struct {
+	Preset
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// Agents lists presets with availability (node online, runtime and workspace present).
+func (m *Manager) Agents(ctx context.Context) []AgentStatus {
+	out := make([]AgentStatus, 0, len(m.Presets))
+	for _, p := range m.Presets {
+		a := AgentStatus{Preset: p}
+		if l, err := m.link(p.Node); err != nil {
+			a.Reason = err.Error()
+		} else if info := l.Info(ctx); !hasRuntime(info, p.Runtime) {
+			a.Reason = "节点上没有可用的 " + p.Runtime
+		} else if !hasWorkspace(info, p.Workspace) {
+			a.Reason = "节点上没有工作区 " + p.Workspace
+		} else {
+			a.Available = true
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func (m *Manager) preset(name string) (Preset, bool) {
+	for _, p := range m.Presets {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Preset{}, false
+}
+
+func (m *Manager) notice(n Notice) {
+	if m.OnNotice != nil {
+		m.OnNotice(n)
+	}
+}
+
 // CreateReq creates a task.
 type CreateReq struct {
+	Agent           string `json:"agent"` // preset name; fills node/workspace/runtime/model
 	Title           string `json:"title"`
 	Instruction     string `json:"instruction"`
 	ConversationID  string `json:"conversation_id"`
@@ -137,6 +204,18 @@ func (m *Manager) Create(ctx context.Context, req CreateReq) (store.Task, error)
 	if strings.TrimSpace(req.Instruction) == "" {
 		return store.Task{}, errors.New("instruction required")
 	}
+	var standing string
+	if req.Agent != "" {
+		p, ok := m.preset(req.Agent)
+		if !ok {
+			return store.Task{}, fmt.Errorf("没有名为 %s 的 Agent", req.Agent)
+		}
+		req.Node, req.Workspace, req.Runtime = p.Node, p.Workspace, p.Runtime
+		if req.Model == "" {
+			req.Model = p.Model
+		}
+		standing = p.Instructions
+	}
 	l, err := m.link(req.Node)
 	if err != nil {
 		return store.Task{}, err
@@ -148,7 +227,7 @@ func (m *Manager) Create(ctx context.Context, req CreateReq) (store.Task, error)
 	if !hasWorkspace(info, req.Workspace) {
 		return store.Task{}, fmt.Errorf("节点 %s 上没有工作区 %s", req.Node, req.Workspace)
 	}
-	prompt, convTitle, err := m.buildPrompt(ctx, req)
+	prompt, convTitle, err := m.buildPrompt(ctx, req, standing)
 	if err != nil {
 		return store.Task{}, err
 	}
@@ -159,7 +238,7 @@ func (m *Manager) Create(ctx context.Context, req CreateReq) (store.Task, error)
 			title = clip(req.Instruction, 28) + " · " + clip(convTitle, 12)
 		}
 	}
-	t := store.Task{ID: newTaskID(), Title: title, Instruction: req.Instruction, Status: store.TaskQueued,
+	t := store.Task{ID: newTaskID(), Title: title, Agent: req.Agent, Instruction: req.Instruction, Status: store.TaskQueued,
 		Node: req.Node, Workspace: req.Workspace, Runtime: req.Runtime, Model: req.Model, ConversationID: req.ConversationID}
 	if err := m.store.CreateTask(ctx, t); err != nil {
 		return t, err
@@ -198,9 +277,13 @@ var platformName = map[string]string{
 
 // buildPrompt wraps the instruction with the source conversation's recent
 // history — the core of "message-driven work": the agent sees what you saw.
-func (m *Manager) buildPrompt(ctx context.Context, req CreateReq) (string, string, error) {
+func (m *Manager) buildPrompt(ctx context.Context, req CreateReq, standing string) (string, string, error) {
 	var b strings.Builder
-	b.WriteString("你是用户在个人工作平台 life-agent 里派出的 Agent。\n\n## 用户的指示\n")
+	b.WriteString("你是用户在个人工作平台 life-agent 里派出的 Agent。\n")
+	if s := strings.TrimSpace(standing); s != "" {
+		b.WriteString("\n## 你的设定\n" + s + "\n")
+	}
+	b.WriteString("\n## 用户的指示\n")
 	b.WriteString(strings.TrimSpace(req.Instruction))
 	b.WriteString("\n")
 	title := ""
@@ -341,8 +424,10 @@ func (m *Manager) SessionEvent(ctx context.Context, taskID string, ev agent.Even
 			}
 		case node.StateIdle:
 			p.Status = ptr(store.TaskIdle)
+			m.noticeTask(ctx, taskID, "task_done", "")
 		case node.StateFailed:
 			p.Status, p.Error = ptr(store.TaskFailed), ptr(ev.Input)
+			m.noticeTask(ctx, taskID, "task_failed", ev.Input)
 		case node.StateCancelled:
 			p.Status = ptr(store.TaskCanceled)
 		}
@@ -372,7 +457,24 @@ func (m *Manager) ApprovalRequest(ctx context.Context, req node.ApprovalReq) err
 		return err
 	}
 	_, _ = m.store.AppendTaskEvent(ctx, req.TaskID, agent.EvApproval, req, time.Now())
+	title := req.TaskID
+	if t, err := m.store.GetTask(ctx, req.TaskID); err == nil {
+		title = t.Title
+	}
+	m.notice(Notice{Kind: "approval", TaskID: req.TaskID, ID: req.ID, Title: title, Body: req.Tool + "：" + clip(req.Input, 120)})
 	return m.store.UpdateTask(ctx, req.TaskID, store.TaskPatch{Status: ptr(store.TaskWaiting)})
+}
+
+func (m *Manager) noticeTask(ctx context.Context, taskID, kind, detail string) {
+	t, err := m.store.GetTask(ctx, taskID)
+	if err != nil {
+		return
+	}
+	body := clip(t.Result, 120)
+	if kind == "task_failed" {
+		body = clip(detail, 120)
+	}
+	m.notice(Notice{Kind: kind, TaskID: taskID, Title: t.Title, Body: body})
 }
 
 // LocalLink adapts an in-process node to NodeLink.

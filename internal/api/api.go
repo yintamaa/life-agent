@@ -29,6 +29,7 @@ import (
 
 	"github.com/yintamaa/life-agent/internal/connector"
 	"github.com/yintamaa/life-agent/internal/model"
+	"github.com/yintamaa/life-agent/internal/push"
 	"github.com/yintamaa/life-agent/internal/store"
 	"github.com/yintamaa/life-agent/internal/work"
 )
@@ -41,6 +42,7 @@ type Server struct {
 	Static     fs.FS // web/dist; may be nil
 	Auth       *Authenticator
 	Work       *work.Manager // nil when agent orchestration is disabled
+	Push       *push.Service // nil when push is disabled
 
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
@@ -124,6 +126,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/whoami", s.whoami)
 	s.registerWork(mux)
+	s.registerPush(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	if s.Static != nil {
 		mux.Handle("/", spa(s.Static))

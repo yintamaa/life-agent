@@ -15,6 +15,7 @@ import (
 	"github.com/yintamaa/life-agent/internal/connector/wechat"
 	"github.com/yintamaa/life-agent/internal/node"
 	"github.com/yintamaa/life-agent/internal/triage"
+	"github.com/yintamaa/life-agent/internal/work"
 )
 
 // Config is the whole file.
@@ -30,6 +31,15 @@ type Config struct {
 	Mail    []mail.Account `yaml:"mail"`
 	// Node runs agents on the hub machine itself (in-process node).
 	Node NodeConfig `yaml:"node"`
+	// Agents are named presets (where / which CLI / standing instructions).
+	Agents []work.Preset `yaml:"agents"`
+	Push   PushConfig    `yaml:"push"`
+}
+
+// PushConfig controls Web Push notifications.
+type PushConfig struct {
+	Disabled bool   `yaml:"disabled"`
+	Subject  string `yaml:"subject"` // VAPID contact (mailto: or https URL)
 }
 
 // NodeConfig enables the in-process node.
@@ -53,6 +63,16 @@ func Load(path string) (*Config, error) {
 	}
 	if c.DataDir == "" {
 		c.DataDir = "data"
+	}
+	names := map[string]bool{}
+	for _, a := range c.Agents {
+		if a.Name == "" || a.Node == "" || a.Workspace == "" || a.Runtime == "" {
+			return nil, fmt.Errorf("agent preset needs name, node, workspace and runtime: %q", a.Name)
+		}
+		if names[a.Name] {
+			return nil, fmt.Errorf("duplicate agent preset %q", a.Name)
+		}
+		names[a.Name] = true
 	}
 	seen := map[string]bool{}
 	for _, a := range c.Mail {
