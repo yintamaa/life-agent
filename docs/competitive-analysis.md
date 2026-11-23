@@ -162,6 +162,7 @@
     - 直接往 `/dev/ttysNNN` 写只会显示在屏幕上，不会变成输入。`TIOCSTI` 注入按键要求那个 tty 是调用方的控制终端，否则得有 root。
   - **原样接管做不到。** Linux 上 reptyr 靠 ptrace 往目标进程里注入系统调用来换 PTY，macOS 开着 SIP 时拿不到别的进程的 task port，这条路不通。
   - **可行的"一键接管"**：等登记里的 `status` 变成 `idle`，取出 `sessionId` 和 `cwd`，结束原进程，在 herdr 的 pane 里 `cd <cwd> && claude --resume <sessionId>`。herdr 的 `src/agent_resume.rs` 已经有生成 resume 命令的逻辑，改动量不大。代价是原来那个终端窗口里的进程会退出，而且只能在 idle 时做。
+  - **贡献渠道**：herdr 不接受名单外的人主动提 PR，会被自动关闭（见仓库 `CONTRIBUTING.md` 和 `.github/APPROVED_CONTRIBUTORS`）。功能想法只能发 Discussion，要短，只讲问题，不附实现。2026-11-23 评估后决定不提：完整的"看见外部会话"不符合 herdr"每个 pane 都有自己的 PTY"的模型；"停掉再续上"手动一条命令就能完成，收益太小。
   - **改 herdr 的难点**：herdr 的数据模型假设每个 pane 都有自己的 PTY（`src/pane.rs` 的 `PaneRuntimeIo`），要显示"不归它管、只读"的外部会话，就得加一种新实体，牵扯 UI、socket API 和持久化。上游提交非常频繁，fork 维护成本高。这件事放在我们自己的 node 里做（读登记目录加全局 hook）更合适。
 - **和我们的关系**：
   - 我们的 node 用 `claude -p --output-format stream-json` 和 `codex exec --json` 无头驱动 Agent，状态来自结构化事件，比读屏可靠，也不受 UI 改版影响。代价是人没法中途接手，想接着聊只能 `--resume` 另开一轮。
