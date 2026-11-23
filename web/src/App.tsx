@@ -29,7 +29,8 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [jumpTo, setJumpTo] = useState<{ id: string; nonce: number }>();
-  const [handoff, setHandoff] = useState<Conversation | null>(null);
+  // conv set = "交给 Agent" from a conversation; conv undefined = standalone 新建任务
+  const [handoff, setHandoff] = useState<{ conv?: Conversation } | null>(null);
   const [agentReady, setAgentReady] = useState(false);
 
   // Keep sidebar badges fresh on every page (one shared SSE connection).
@@ -76,10 +77,10 @@ export default function App() {
           </button>
         </div>
         {route === "messages" ? (
-          <MessagesPage onCounts={onCounts} jumpTo={jumpTo} agentReady={agentReady} onHandoff={setHandoff}
+          <MessagesPage onCounts={onCounts} jumpTo={jumpTo} agentReady={agentReady} onHandoff={(conv) => setHandoff({ conv })}
             onOpenApprovals={() => navigate("todo?f=approvals")} />
         ) : route === "todo" ? (
-          <TasksPage onCounts={onCounts} nav={hash.raw}
+          <TasksPage onCounts={onCounts} nav={hash.raw} onNewTask={() => setHandoff({})}
             initialFilter={f && (FILTERS as string[]).includes(f) ? (f as TaskFilter) : undefined}
             initialTask={hash.params.get("t") ?? undefined} />
         ) : (
@@ -96,7 +97,7 @@ export default function App() {
         onPick={(h) => { setSearchOpen(false); navigate("messages"); setJumpTo({ id: h.conversation_id, nonce: Date.now() }); }}
       />
       {handoff && (
-        <HandoffModal conv={handoff} onClose={() => setHandoff(null)}
+        <HandoffModal conv={handoff.conv} onClose={() => setHandoff(null)}
           onCreated={(t) => { setHandoff(null); navigate(`todo?t=${encodeURIComponent(t.id)}`); }} />
       )}
     </div>

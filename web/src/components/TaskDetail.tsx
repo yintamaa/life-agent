@@ -223,7 +223,9 @@ function ReplyCard({ task, reply }: { task: Task; reply: string }) {
   );
 }
 
-export function TaskDetail({ taskId, version, onChanged }: { taskId: string; version: number; onChanged: () => void }) {
+export function TaskDetail({ taskId, version, onChanged, agentTitles = {} }: {
+  taskId: string; version: number; onChanged: () => void; agentTitles?: Record<string, string>;
+}) {
   const [task, setTask] = useState<Task | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -291,6 +293,7 @@ export function TaskDetail({ taskId, version, onChanged }: { taskId: string; ver
           <span className="thread-name">{task.title}</span>
           <span className="thread-meta task-meta">
             <span className={`task-pill tone-${st.tone}`}>{st.label}</span>
+            {task.agent && <span className="task-agent">{agentTitles[task.agent] ?? task.agent}</span>}
             <span className="task-chip">{task.node}</span>
             <span className="task-chip">{task.workspace}</span>
             <span className="task-chip">{RUNTIME_LABEL[task.runtime] ?? task.runtime}</span>

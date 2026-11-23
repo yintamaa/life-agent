@@ -69,9 +69,24 @@ export interface NodeStatus {
   info?: NodeInfo;
 }
 
+/** Named agent preset from config.yaml (where / which CLI / standing instructions). */
+export interface AgentPreset {
+  name: string;
+  title: string;
+  node: string;
+  workspace: string;
+  runtime: RuntimeName;
+  model?: string;
+  instructions?: string;
+  available: boolean;
+  reason?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
+  /** preset name, "" = custom */
+  agent?: string;
   instruction: string;
   status: TaskStatus;
   node: string;
@@ -137,9 +152,11 @@ export interface CreateTaskReq {
   instruction: string;
   conversation_id?: string;
   context_messages?: number;
-  node: string;
-  workspace: string;
-  runtime: RuntimeName;
+  /** preset name; when set the server fills node/workspace/runtime/model */
+  agent?: string;
+  node?: string;
+  workspace?: string;
+  runtime?: RuntimeName;
   model?: string;
 }
 

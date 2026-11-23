@@ -20,6 +20,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
 	"sort"
 	"strconv"
@@ -420,6 +421,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			fl.Flush()
 		}
 	}
+}
+
+func init() {
+	// PWA manifest; Go's mime table doesn't know it (would be octet-stream).
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 }
 
 // spa serves static files and falls back to index.html for client routes.

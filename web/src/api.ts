@@ -1,6 +1,6 @@
 import { mock } from "./mock";
 import type {
-  Approval, Conversation, Counts, CreateTaskReq, Message, NodeStatus, SearchHit, Source, Task, TaskEvent, View,
+  AgentPreset, Approval, Conversation, Counts, CreateTaskReq, Message, NodeStatus, SearchHit, Source, Task, TaskEvent, View,
 } from "./types";
 
 let useMock = import.meta.env.VITE_MOCK === "1";
@@ -77,6 +77,7 @@ export const api = {
 
   // ---- agent orchestration ----
   nodes: () => call(() => req<NodeStatus[]>("/api/nodes"), mock.nodes),
+  agents: () => call(() => req<AgentPreset[]>("/api/agents"), mock.agents),
   tasks: (status: string) => call(() => req<Task[]>(`/api/tasks?status=${enc(status)}&limit=100`), () => mock.tasks(status)),
   task: (id: string) => call(() => req<Task>(`/api/tasks/${enc(id)}`), () => mock.task(id)),
   /** Incremental: only events with seq > after. */
@@ -113,6 +114,14 @@ export const api = {
       },
       () => mock.decide(id, allow),
     ),
+};
+
+// ---- web push (never mocked: needs a real backend + service worker) ----
+export const pushApi = {
+  vapid: () => req<{ public_key: string }>("/api/push/vapid"),
+  subscribe: (sub: PushSubscriptionJSON) => postJSON<void>("/api/push/subscribe", sub),
+  unsubscribe: (endpoint: string) => postJSON<void>("/api/push/unsubscribe", { endpoint }),
+  test: () => postJSON<{ delivered: number }>("/api/push/test", {}),
 };
 
 /**

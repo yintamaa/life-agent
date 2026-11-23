@@ -1,4 +1,5 @@
 import type {
+  AgentPreset,
   Approval, Conversation, Counts, CreateTaskReq, Message, NodeStatus, SearchHit, Source, Task, TaskEvent, TaskEventPayload, TaskEventType, View,
 } from "./types";
 
@@ -158,9 +159,16 @@ const mockNodes: NodeStatus[] = [
   { name: "qq-vm", online: false, last_seen: ago(180) },
 ];
 
+const mockAgents: AgentPreset[] = [
+  { name: "life-agent-dev", title: "life-agent 开发", node: "mac-mini", workspace: "life-agent", runtime: "claude-code", available: true,
+    instructions: "保持实现精简，完成后跑 make test。" },
+  { name: "tos-dev", title: "TOS 开发", node: "work-laptop", workspace: "tos-increment", runtime: "claude-code", available: false,
+    reason: "节点 work-laptop 不在线" },
+];
+
 const tasksM: Task[] = [
   {
-    id: "t261119-a1b2c3", title: "排查计量异动告警 · 火山TOS-计量…", instruction: "帮我排查这个告警，给出原因和处理建议",
+    id: "t261119-a1b2c3", title: "排查计量异动告警 · 火山TOS-计量…", agent: "tos-dev", instruction: "帮我排查这个告警，给出原因和处理建议",
     status: "waiting_approval", node: "work-laptop", workspace: "tos-increment", runtime: "claude-code", model: "",
     conversation_id: "feishu:c0", session_id: "fdaa0743-e65d-42bb-a042-bb90640d4070",
     workdir: "/Users/me/life-agent/data/node/worktrees/tos-increment/t261119-a1b2c3", result: "", error: "", cost_usd: 0.42,
@@ -260,6 +268,7 @@ export const mock = {
   },
 
   nodes: (): NodeStatus[] => mockNodes,
+  agents: (): AgentPreset[] => mockAgents,
   tasks: (status: string): Task[] => {
     refreshPending();
     return tasksM.filter((t) => {
@@ -277,9 +286,11 @@ export const mock = {
   taskEvents: (id: string, after: number): TaskEvent[] => (evs[id] ?? []).filter((e) => e.seq > after),
   createTask: (b: CreateTaskReq): Task => {
     const id = `t261119-${Math.random().toString(16).slice(2, 8)}`;
+    const p = b.agent ? mockAgents.find((a) => a.name === b.agent) : undefined;
     const t: Task = {
-      id, title: b.title || b.instruction.slice(0, 28), instruction: b.instruction, status: "running", node: b.node, workspace: b.workspace,
-      runtime: b.runtime, model: b.model ?? "", conversation_id: b.conversation_id ?? "", session_id: "", workdir: `/tmp/worktrees/${b.workspace}/${id}`,
+      id, title: b.title || b.instruction.slice(0, 28), agent: b.agent ?? "", instruction: b.instruction, status: "running",
+      node: p?.node ?? b.node ?? "", workspace: p?.workspace ?? b.workspace ?? "",
+      runtime: p?.runtime ?? b.runtime ?? "claude-code", model: b.model ?? "", conversation_id: b.conversation_id ?? "", session_id: "", workdir: `/tmp/worktrees/${p?.workspace ?? b.workspace}/${id}`,
       result: "", error: "", cost_usd: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), pending_approvals: 0,
     };
     tasksM.unshift(t);

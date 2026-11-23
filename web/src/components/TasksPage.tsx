@@ -1,10 +1,11 @@
-import { Bot, CheckCheck, ListTodo, Loader, ShieldAlert, Inbox as InboxIcon, Server } from "lucide-react";
+import { Bot, CheckCheck, ListTodo, Loader, Plus, ShieldAlert, Inbox as InboxIcon, Server } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { api, ApiError, isMock, subscribe } from "../api";
 import { relTime } from "../lib/time";
 import { RUNTIME_LABEL, STATUS } from "../lib/task";
 import { ApprovalBanner } from "./ApprovalBanner";
+import { PushControl } from "./PushControl";
 import { TaskDetail } from "./TaskDetail";
 import type { Counts, NodeStatus, Task, TaskFilter } from "../types";
 
@@ -16,13 +17,13 @@ const FILTERS: Array<{ f: TaskFilter; label: string; icon: LucideIcon }> = [
 ];
 
 const EMPTY: Record<TaskFilter, string> = {
-  active: "没有进行中的任务。在任意会话里点「交给 Agent」开始",
+  active: "没有进行中的任务。点「新建任务」，或在任意会话里点「交给 Agent」",
   approvals: "没有等待审批的操作 ✓",
   done: "还没有已关闭的任务",
   all: "还没有任务",
 };
 
-function TaskRow({ t, selected, onSelect }: { t: Task; selected: boolean; onSelect: () => void }) {
+function TaskRow({ t, selected, onSelect, agentTitle }: { t: Task; selected: boolean; onSelect: () => void; agentTitle?: string }) {
   const st = STATUS[t.status];
   return (
     <li>
@@ -35,6 +36,7 @@ function TaskRow({ t, selected, onSelect }: { t: Task; selected: boolean; onSele
           </span>
           <span className="conv-line2">
             <span className={`task-pill tone-${st.tone}`}>{st.label}</span>
+            {agentTitle && <span className="task-agent">{agentTitle}</span>}
             <span className="task-chips">{t.node} · {t.workspace} · {RUNTIME_LABEL[t.runtime] ?? t.runtime}</span>
             {t.pending_approvals > 0 && <span className="task-approvals" title="等待审批"><ShieldAlert size={12} /> {t.pending_approvals}</span>}
           </span>
@@ -44,8 +46,9 @@ function TaskRow({ t, selected, onSelect }: { t: Task; selected: boolean; onSele
   );
 }
 
-export function TasksPage({ onCounts, initialFilter, initialTask, nav }: {
+export function TasksPage({ onCounts, initialFilter, initialTask, nav, onNewTask }: {
   onCounts: (c: Counts) => void;
+  onNewTask: () => void;
   initialFilter?: TaskFilter;
   initialTask?: string;
   nav: string; // changes whenever the hash changes, to re-apply deep links
@@ -58,6 +61,11 @@ export function TasksPage({ onCounts, initialFilter, initialTask, nav }: {
   const [disabled, setDisabled] = useState("");
   const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState(0);
+  const [agentTitles, setAgentTitles] = useState<Record<string, string>>({});
+  useEffect(() => {
+    api.agents().then((as) => setAgentTitles(Object.fromEntries(as.map((a) => [a.name, a.title || a.name])))).catch(() => {});
+  }, []);
+  const titleOf = (t: Task) => (t.agent ? agentTitles[t.agent] ?? t.agent : undefined);
 
   // deep links: #/todo?f=approvals&t=<task id>
   useEffect(() => {
@@ -106,7 +114,11 @@ export function TasksPage({ onCounts, initialFilter, initialTask, nav }: {
           <span className="page-icon page-icon-todo"><ListTodo size={20} strokeWidth={1.8} /></span>
           <h1>待办</h1>
           {isMock() && <span className="mock-tag" title="后端未连接，正在展示示例数据">示例数据</span>}
+          <span className="page-title-actions">
+            <button className="btn btn-primary" onClick={onNewTask} disabled={!!disabled}><Plus size={14} /> 新建任务</button>
+          </span>
         </div>
+        <PushControl />
         <p className="page-sub">交给 Agent 的任务；需要你批准的操作会推到这里，任何设备上先点的那一下生效</p>
         {filter !== "approvals" && <ApprovalBanner count={approvals} onOpen={() => { setFilter("approvals"); pick(null); }} />}
         <div className="tabs" role="tablist">
@@ -154,7 +166,7 @@ export function TasksPage({ onCounts, initialFilter, initialTask, nav }: {
               : tasks.length === 0 ? <div className="list-empty">{EMPTY[filter]}{filter === "active" && online.length === 0 ? <><br />（当前没有在线节点）</> : null}</div>
               : (
                 <ul className="conv-list">
-                  {tasks.map((t) => <TaskRow key={t.id} t={t} selected={t.id === selected} onSelect={() => pick(t.id)} />)}
+                  {tasks.map((t) => <TaskRow key={t.id} t={t} selected={t.id === selected} onSelect={() => pick(t.id)} agentTitle={titleOf(t)} />)}
                 </ul>
               )}
           </div>
@@ -162,7 +174,7 @@ export function TasksPage({ onCounts, initialFilter, initialTask, nav }: {
             {selected ? (
               <>
                 <button className="back-mobile" onClick={() => pick(null)}>← 返回</button>
-                <TaskDetail taskId={selected} version={version} onChanged={() => refresh.current()} />
+                <TaskDetail taskId={selected} version={version} onChanged={() => refresh.current()} agentTitles={agentTitles} />
               </>
             ) : (
               <div className="thread-placeholder">
