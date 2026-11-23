@@ -148,6 +148,11 @@
   - `agent prompt --wait` 先观察到 working，再等到 idle 才返回，一次往返约 11 秒；`agent read` 能读回回复内容。
   - 停掉 server 再启动：workspace、pane 和 cwd 都恢复了，Claude 进程没有恢复，会话也没续上。要续会话，得先运行 `herdr integration install claude`，往 `~/.claude/settings.json` 装一个上报 session id 的 hook，恢复时再由 herdr 在 pane 里敲 `claude --resume <id>`。这一步要改全局配置，本次没装。
   - 程序对外只连两处：更新清单 `herdr.dev/latest.json` 和识别规则清单。源码里没有遥测。
+- **只管自己开的 pane，接管不了已经在跑的 Agent**（用户实测发现，源码 `e8d7d97` 核实）：
+  - 识别的三路信号都绑在 herdr 自己分配的 PTY 上：pane 子进程的前台进程组（`src/pane.rs` 的 `probe_foreground_process`）、这个 PTY 的屏幕缓冲区（`src/detect/`）、以及 hook 上报。herdr 不扫描本机进程，也没有 adopt、attach 外部进程之类的命令。
+  - 装了 integration 也没用：Claude 的 hook 脚本开头就检查 `HERDR_ENV=1`、`HERDR_SOCKET_PATH`、`HERDR_PANE_ID`，缺一个就 `exit 0`（`src/integration/assets/claude/herdr-agent-state.sh`）。这些变量只有 herdr 在 pane 里起进程时才注入，所以在 iTerm 或 VS Code 里启动的 `claude` 发出的上报会被直接丢掉。
+  - 想纳管，只能在 herdr 的 pane 里重新起：先退出原来的进程，再在 pane 里 `claude --resume <id>`，会话可以续上。正在跑的那一轮没法无损迁移，因为 PTY 的控制端换不了（reptyr 一类工具在 macOS 上不可用）。
+  - 对我们的启发：想覆盖"用户自己在终端里开的 Agent"，靠接管 PTY 走不通，得靠全局 hook，也就是在 `~/.claude/settings.json` 里装一个不依赖父进程环境变量的上报 hook，按 session id、cwd、pid 认 Agent。这样只能看状态、做审批，发不了键。
 - **和我们的关系**：
   - 我们的 node 用 `claude -p --output-format stream-json` 和 `codex exec --json` 无头驱动 Agent，状态来自结构化事件，比读屏可靠，也不受 UI 改版影响。代价是人没法中途接手，想接着聊只能 `--resume` 另开一轮。
   - herdr 正好反过来：Agent 跑在真终端里，人随时可以 attach 进去接手，状态则靠读屏推断。
