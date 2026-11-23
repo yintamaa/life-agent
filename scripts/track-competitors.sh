@@ -24,8 +24,10 @@ while [ "$i" -lt "$n" ]; do
   repo="$(jq -r ".competitors[$i].repo" "$list")"
   rev="$(jq -r ".competitors[$i].reviewed_commit" "$list")"
   since="$(jq -r ".competitors[$i].reviewed_at" "$list")"
+  track="$(jq -r ".competitors[$((i))].track // true" "$list")"
   i=$((i + 1))
   if [ -n "$only" ] && [ "$only" != "$name" ]; then continue; fi
+  if [ -z "$only" ] && [ "$track" = "false" ]; then continue; fi
 
   dir="$cache/$name"
   # shallow-since 往前多留一天，保证复核时的提交在历史里

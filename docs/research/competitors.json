@@ -1,12 +1,47 @@
 {
-  "_comment": "竞品跟踪清单：repo 必须是真正的上游（不是镜像或 fork）。每次复核完把 reviewed_commit / reviewed_at 更新为当时分析的版本。scripts/track-competitors.sh 会据此报告落后多少、改了什么。",
+  "_comment": "竞品跟踪清单：repo 必须是真正的上游（不是镜像或 fork）。每次复核完把 reviewed_commit / reviewed_at 更新为当时分析的版本。scripts/track-competitors.sh 会据此报告落后多少、改了什么。 track=false 的条目脚本会跳过；priority=primary 是重点跟踪对象。",
   "keywords": "inbox|wechat|weixin|lark|feishu|qq|discord|telegram|whatsapp|slack|imessage|sms|mail|imap|calendar|health|location|expense|bill|parcel|subscription|push|apns|sync|offline|node|link|tunnel|approval|permission|worktree",
   "competitors": [
-    {"name": "persona",         "repo": "https://github.com/nwverse/persona",         "reviewed_commit": "4aaef55",   "reviewed_at": "2026-11-09", "note": "daidr/persona 是停更的镜像，真正的上游是 nwverse"},
-    {"name": "openclaw",        "repo": "https://github.com/openclaw/openclaw",       "reviewed_commit": "6b5bc83ae", "reviewed_at": "2026-11-18"},
-    {"name": "botmux",          "repo": "https://github.com/deepcoldy/botmux",        "reviewed_commit": "697de2f",   "reviewed_at": "2026-11-18"},
-    {"name": "botmux-platform", "repo": "https://github.com/botmux-ai/botmux-platform", "reviewed_commit": "bd7faf3",  "reviewed_at": "2026-11-11"},
-    {"name": "happyclaw",       "repo": "https://github.com/riba2534/happyclaw",      "reviewed_commit": "d90e9d9",   "reviewed_at": "2026-11-20"},
-    {"name": "multica",         "repo": "https://github.com/multica-ai/multica",      "reviewed_commit": "",          "reviewed_at": "2026-11-18", "note": "只看过 README，未做源码分析"}
+    {
+      "name": "persona",
+      "repo": "https://github.com/nwverse/persona",
+      "reviewed_commit": "4aaef55",
+      "reviewed_at": "2026-11-09",
+      "note": "daidr/persona 是停更的镜像，真正的上游是 nwverse",
+      "priority": "primary"
+    },
+    {
+      "name": "openclaw",
+      "repo": "https://github.com/openclaw/openclaw",
+      "reviewed_commit": "6b5bc83ae",
+      "reviewed_at": "2026-11-18",
+      "track": false,
+      "note": "2026-11-23 起不再跟踪：方向已过时。文档里的分析保留作历史参考"
+    },
+    {
+      "name": "botmux",
+      "repo": "https://github.com/deepcoldy/botmux",
+      "reviewed_commit": "697de2f",
+      "reviewed_at": "2026-11-18"
+    },
+    {
+      "name": "botmux-platform",
+      "repo": "https://github.com/botmux-ai/botmux-platform",
+      "reviewed_commit": "bd7faf3",
+      "reviewed_at": "2026-11-11"
+    },
+    {
+      "name": "happyclaw",
+      "repo": "https://github.com/riba2534/happyclaw",
+      "reviewed_commit": "d90e9d9",
+      "reviewed_at": "2026-11-20"
+    },
+    {
+      "name": "multica",
+      "repo": "https://github.com/multica-ai/multica",
+      "reviewed_commit": "",
+      "reviewed_at": "2026-11-18",
+      "note": "只看过 README，未做源码分析"
+    }
   ]
 }
