@@ -201,6 +201,11 @@
   - 权限分四档：Supervised（命令和改文件都要批）、Auto-accept edits（改文件自动过）、Auto（交给 provider 自带的自动审查，只把拿不准的问你）、Full access。**新 thread 默认是 Full access**，项目可以覆盖。
 - **能导入你在终端里开过的会话**：`apps/server/src/project/AgentSessionScanner.ts` 扫描 `~/.claude/projects/*.jsonl` 和 Codex 的 `session_index.jsonl`，导入成 thread 后在 T3 里续接。这是"导入历史再续上"，不是接管正在跑的进程，和 herdr 那一节的结论一致。
 - **对外开放**：每个 environment 都是一个带 OAuth 的 MCP server（`/mcp`）。终端里的 Claude Code / Codex、ChatGPT 或任何支持 OAuth 的 MCP 客户端，都能启动、跟进、读取 thread（`t3_thread_launch`、`t3_thread_wait`、`t3_thread_read`），也能订阅 MCP Events，比如"一轮结束""Agent 在等人"。在 environment 所在的机器上，`t3 thread start . "…" --wait --json` 不用登录就能调，Agent 等你回答时以退出码 2 返回（`docs/user/outside-agents.md`）。
+- **投入有多大**（2026-11-24 按 git 历史统计）：
+  - 背后是公司 T3 Tools, Inc.（Theo Browne 的 T3 团队）。T3 Code 本身免费，靠 T3 Connect 的机器数上限把用户导向付费的 T3 Chat。
+  - 近 30 天 763 个作者、约 5,800 个合入的 PR；提交量从 8 月的每月约 700 个涨到 11 月的约 4,700 个。核心维护者一人 30 天提交 2,326 次，其中大量带 `Co-authored-by: Claude`，**主力是"小核心团队 + 大量 AI 写代码 + 社区 PR"**，不是几百人的工程团队。
+  - 非测试代码约 130 万行：server 34 万、web 36 万、mobile 20 万、共享包 28 万、托管中继 2 万；测试文件约 6,500 个；14 个 provider 包、11 个代码托管平台包。我们是约 7.8k 行 Go 加 2.9k 行前端。
+  - 行数多不等于质量高，但它覆盖的面（原生 App、推送、十几种 Agent 的协议差异、性能回归检查）确实是一个人兼职做不完的。
 - **一句话**：**多机、多端的编码 Agent 控制面**。它把我们"Agent 帮你处理"那一半做到了极致，但对"你的生活数据"一无所知。
 
 和我们的关系：
