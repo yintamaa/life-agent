@@ -11,7 +11,7 @@
 
 产品规划（数据源目录、生活场景、优先级）见 [docs/product-life.md](docs/product-life.md)。
 
-## 和 OpenClaw / Persona / botmux / Multica / HappyClaw 有什么不同
+## 和 OpenClaw / Persona / botmux / Multica / HappyClaw / T3 Code 有什么不同
 
 | | 任务从哪来 | Agent 拿得到的上下文 | 存 IM 正文 | 微信 / QQ 聊天记录 | 重量 |
 |---|---|---|---|---|---|
@@ -20,6 +20,7 @@
 | botmux | 飞书话题（一个话题一个 CLI） | 当前话题 | ✗（留在飞书） | ✗ | 中 |
 | Multica | issue 看板 | issue 内容 | ✗ | ✗ | 中重 |
 | HappyClaw | Web 和 8 个 IM 机器人里与 Bot 对话、定时任务 | 和 Bot 的会话 | 只存 Bot 会话 | ✗（都是官方 Bot 通道） | 中重（多用户 Node 单体） |
+| T3 Code | 自己开的 thread、定时任务、webhook、issue | 和 Agent 的对话、仓库 | 只存 Agent 对话 | ✗（没有任何 IM 连接器） | 重（多端原生 App + 托管中继） |
 | **life-agent** | **全渠道消息**、看板、主 Agent | **完整的 IM 历史和全文搜索** | ✅ | ✅ | 轻 |
 
 其他项目都把 IM 当作给 Agent 下指令的入口；我们把**你的生活数据**当作核心：先汇总、先整理，Agent 是帮你打理的手。工作编排只是其中一块。

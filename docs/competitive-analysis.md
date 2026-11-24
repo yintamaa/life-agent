@@ -11,6 +11,7 @@
 > | [HappyClaw](https://github.com/riba2534/happyclaw) | `d90e9d9`（2026-11-20） |
 > | [Multica](https://github.com/multica-ai/multica) | 仅作界面参考 |
 | [herdr](https://github.com/herdrdev/herdr) | `e8d7d97`（v0.9.5，2026-11-23 本机安装实测；本文中唯一实际运行过的项目） |
+| [T3 Code](https://github.com/pingdotgg/t3code) | `c9e22e5ff4`（2026-11-24，只读源码和文档，未运行） |
 
 ## 1. 定位：大家在解决不同的问题
 
@@ -177,6 +178,37 @@
   - Persona 在 node 下面用的就是 herdr 这一层（见上文）。
 - **一句话**：**靠读屏识别 Agent 状态的终端复用器**。适合人和 Agent 轮流使用同一个会话，不适合当无人值守的执行引擎。
 
+### T3 Code：编码 Agent 的控制面（Agent 这一半最强的对手，也可能当底座）
+
+> 2026-11-24 拉取源码 `c9e22e5ff4` 只读分析，没有安装运行。仓库 2026-02-08 创建，9 个半月 7.6 万星、1.25 万 fork；最近一周约 1,340 个提交（每天约 190 个），约 3.3 万个文件。代码 MIT 许可，但名称和图标受商标保护，fork 必须换品牌。
+
+- **要解决的问题**：标语是 "The open-source control plane for coding agents"。在你自己的机器上运行你已经登录的编码 Agent（Claude Code、Codex、Cursor、OpenCode 等十余种，外加任意 ACP Agent），给它们一个统一的快界面："在桌前开一个 thread，在手机上批准下一步"。明确不转售 token。
+- **和我们像在哪**：Agent 这一半几乎是同一个立意。
+  - 驱动现成的 CLI、用你自己的订阅，不造运行时；
+  - server 跑在执行机器上，桌面、网页、iOS / Android 看到的是同一批 thread；
+  - 远程靠局域网、Tailscale 或它自己托管的 T3 Connect；
+  - 逐步审批；每个 thread 可以用独立的 worktree；看完 diff 一键提交、推送、开 PR；
+  - 定时任务、webhook、GitHub / Linear issue 都能触发任务；还有持久化的 workflow（Labs 功能），中途可以用 `ask()` 停下来等你回答。
+- **不像在哪：完全没有"消息"和"生活"。** 源码里没有任何 IM、邮件、短信连接器，也没有收件箱和分拣。任务只来自你手打的 thread、定时任务、webhook、issue / PR 事件，以及外部 Agent 经 MCP 发起的 thread。消息在它那里只是"你和 Agent 的对话"。
+- **架构：没有中心 hub，每台机器是一个 environment**（`docs/internals/01_architecture.md`、`05_remote.md`）：
+  - environment 指一台机器上的 server，拥有 provider 进程、终端、Git、checkpoint 和持久状态（SQLite `statev2.sqlite`）。
+  - 客户端各自直连多台 environment，在客户端里汇总（`packages/client-runtime`），这一点和 herdr 一样。托管网页版也只在浏览器里存连接列表，不代理流量。
+  - T3 Connect 是它的云：负责账号、设备授权、分配托管隧道和转发 webhook，数据流量走隧道直达 environment，不经过中继（`06_t3-connect.md`）。**手机后台推送必须开 T3 Connect**，只用直连或 Tailscale 收不到（`docs/user/mobile-notifications.md`）。免费账号最多挂 3 台机器，付费 T3 Chat 提到 10 台或 100 台。
+  - 机器之间用 peer link：一台机器上的 Agent 以 OAuth 客户端身份登录另一台的 `/mcp`。权限只能往下收窄（`T3-Mode-Limit` 头）；低于完全访问的链接派出的 thread 会打上不可修改的 `linkOrigin` 标记，只能动同一来源的 thread。
+- **状态机**：orchestrator 串行处理命令，决策时不做 I/O；事件、投影、命令回执和待执行的副作用（outbox）在同一个数据库事务里提交，事务之后由 effect worker 执行副作用，结果再作为命令喂回去。所以"命令已确认"只表示意图已落库。checkpoint 存成隐藏的 git ref，不往用户分支上加提交。
+- **审批**：
+  - Claude 通过 Claude Agent SDK 的 `query()` 加 `canUseTool` 回调（`ClaudeAdapterV2.ts`）；Codex 通过 app-server（`packages/effect-codex-app-server`）。所以 **Codex 也能逐步审批**，而我们用 `codex exec` 做不到（见 [design-agents.md](design-agents.md) 第 5 节）。
+  - 权限分四档：Supervised（命令和改文件都要批）、Auto-accept edits（改文件自动过）、Auto（交给 provider 自带的自动审查，只把拿不准的问你）、Full access。**新 thread 默认是 Full access**，项目可以覆盖。
+- **能导入你在终端里开过的会话**：`apps/server/src/project/AgentSessionScanner.ts` 扫描 `~/.claude/projects/*.jsonl` 和 Codex 的 `session_index.jsonl`，导入成 thread 后在 T3 里续接。这是"导入历史再续上"，不是接管正在跑的进程，和 herdr 那一节的结论一致。
+- **对外开放**：每个 environment 都是一个带 OAuth 的 MCP server（`/mcp`）。终端里的 Claude Code / Codex、ChatGPT 或任何支持 OAuth 的 MCP 客户端，都能启动、跟进、读取 thread（`t3_thread_launch`、`t3_thread_wait`、`t3_thread_read`），也能订阅 MCP Events，比如"一轮结束""Agent 在等人"。在 environment 所在的机器上，`t3 thread start . "…" --wait --json` 不用登录就能调，Agent 等你回答时以退出码 2 返回（`docs/user/outside-agents.md`）。
+- **一句话**：**多机、多端的编码 Agent 控制面**。它把我们"Agent 帮你处理"那一半做到了极致，但对"你的生活数据"一无所知。
+
+和我们的关系：
+
+- **Agent 执行这一层，不和它比深度。** 原生手机 App、推送、十几种 provider、checkpoint 回滚、模拟器面板，每天近 200 个提交，我们追不上，也不该追。我们的差异仍是第 1 节那句话：任务从全渠道消息里来，带着完整的消息历史，做完回到原会话。
+- **可以当可选的执行底座**，和 herdr 的定位类似（借鉴清单 #26）：node 发现本机装了 `t3`，就多一个运行时适配器，用 `t3 thread start` / `send --wait --json` 发起和续接任务。好处是 Codex 逐步审批、更多 provider、手机上完整的对话界面都现成；代价是审批会落在 T3 自己的界面里，不经过我们的 hub，"统一审批"要打折扣。
+- **它没有中心，恰好印证了第 5.3 节。** 跨机器"谁在等我"靠客户端临时拼出来，手机推送只能交给它自己的云。"一个数字告诉你有几件事要处理"这件事，只有理解业务的 hub 做得到。
+
 ### life-agent（本项目）：消息是数据，也是工作的起点
 
 > 2026-11-23 再次修订：定位为**个人生活大一统的 Agent**，见 [product-life.md](product-life.md)。和 Persona 相比，更重要的差异是"生活"能力：数据源要多要全（消息、短信、账单、快递、行程、健康、智能家居），并且自动整理出生活场景。工作编排是其中一块，不是全部。
@@ -250,14 +282,14 @@
 
 ### 2.4 Agent 协同
 
-| | Persona | botmux | Multica | HappyClaw | life-agent |
-|---|---|---|---|---|---|
-| 运行时 | 驱动各电脑上的 Claude Code / Codex（herdr、Orca、Paseo） | 30+ 种编码 CLI，一个话题一个会话 | 驱动 26 种 Agent CLI | Claude Agent SDK；Codex 只作为模型网关 | Claude Code + Codex，各一个适配器 |
-| 任务从哪来 | 和主 Agent 对话 | 飞书消息 | issue 看板 | Web / IM 里和 Bot 对话；定时任务；团队模式由 router 分派 | **全渠道消息**一键转任务（带最近的消息作为上下文） |
-| 逐次工具审批 | ✅ PreToolUse hook，先答者胜；常驻授权按目录、Git 身份和动作限定；同一答案出现 3 次建议成规则 | 审批卡先点者赢 | — | ✗（bypassPermissions；只有 work item 只读→可写的粗粒度审批） | ✅ PreToolUse hook，推到所有设备，先到者生效，hook 失败一律拒绝 |
-| 执行隔离 | 各电脑本地 | 各机器本地，tmux | 各机器 daemon | 宿主机，或 Docker 沙箱；每个会话一个 git worktree | 每个任务一个 git worktree；Codex 用 workspace-write 沙箱 |
-| 跨机器执行 | ✅ 电脑主动外连 hub | ✅ platform 反向隧道 | ✅ daemon | ✗ 单机 | ✅ node 主动外连，持久 outbox |
-| 多用户 | 单人 | 团队（飞书登录） | 团队 | **多用户**（ACL、TOTP/Passkey、计费） | 单人 |
+| | Persona | botmux | Multica | HappyClaw | T3 Code | life-agent |
+|---|---|---|---|---|---|---|
+| 运行时 | 驱动各电脑上的 Claude Code / Codex（herdr、Orca、Paseo） | 30+ 种编码 CLI，一个话题一个会话 | 驱动 26 种 Agent CLI | Claude Agent SDK；Codex 只作为模型网关 | 十余种 CLI + ACP；Claude 用 Agent SDK，Codex 用 app-server | Claude Code + Codex，各一个适配器 |
+| 任务从哪来 | 和主 Agent 对话 | 飞书消息 | issue 看板 | Web / IM 里和 Bot 对话；定时任务；团队模式由 router 分派 | 手动开 thread；定时任务、webhook、issue / PR 事件；workflow；外部 Agent 经 MCP | **全渠道消息**一键转任务（带最近的消息作为上下文） |
+| 逐次工具审批 | ✅ PreToolUse hook，先答者胜；常驻授权按目录、Git 身份和动作限定；同一答案出现 3 次建议成规则 | 审批卡先点者赢 | — | ✗（bypassPermissions；只有 work item 只读→可写的粗粒度审批） | ✅ 四档权限，Codex 也能逐步审批；**默认 Full access** | ✅ PreToolUse hook，推到所有设备，先到者生效，hook 失败一律拒绝 |
+| 执行隔离 | 各电脑本地 | 各机器本地，tmux | 各机器 daemon | 宿主机，或 Docker 沙箱；每个会话一个 git worktree | 可选 worktree；checkpoint 存隐藏 git ref，可回滚 | 每个任务一个 git worktree；Codex 用 workspace-write 沙箱 |
+| 跨机器执行 | ✅ 电脑主动外连 hub | ✅ platform 反向隧道 | ✅ daemon | ✗ 单机 | ✅ 每台机器一个 environment，客户端直连各台；机器间 peer link 走 MCP | ✅ node 主动外连，持久 outbox |
+| 多用户 | 单人 | 团队（飞书登录） | 团队 | **多用户**（ACL、TOTP/Passkey、计费） | 单人为主（guest link 可让别人旁观、提问） | 单人 |
 
 ### 2.5 生活能力
 
@@ -321,12 +353,20 @@
 | 15 | 粗粒度审批：任务先只读运行，审批通过后才放开写权限 | HappyClaw work item | 计划中（作为"告警诊断"这类自动任务的默认档） |
 | 16 | QQ 被动回复额度（带入站 msg_id、5 分钟内、最多 4 次）与微信 `context_token` 的生命周期处理 | HappyClaw | 仅供参考：我们走 NapCat，不受官方 Bot 额度限制 |
 | 24 | 可选的"交互式"任务：Agent 跑在 herdr 的 pane 里，node 通过 socket API 发 prompt、读状态；手机上看进度，回到电脑前直接 attach 接手 | herdr（Persona 的用法） | 待评估（和现有无头模式并存，不替换） |
+| 26 | 可选的 T3 Code 运行时：node 发现本机装了 `t3`，就用 `t3 thread start` / `send --wait --json` 发起和续接任务（退出码 2 表示等人回答） | T3 Code | 待评估（和无头模式、herdr 交互式并存；审批会落在 T3 界面里） |
+| 27 | 权限分档：逐步审批 / 自动接受改文件 / 交给 provider 自带的自动审查 / 完全访问；项目可覆盖默认档；外部调用者的权限只能往下收窄 | T3 Code | 计划中（和 #22 常驻授权一起做；我们的默认档仍是逐步审批） |
+| 28 | Codex 走 app-server，补上逐步审批 | T3 Code `effect-codex-app-server` | 计划中（补 design-agents 第 5 节的缺口） |
+| 29 | 交接上下文"按预算挑原文，不让模型写摘要"：保留原始请求和最近的问答，原文、顺序、角色都不变；省略的部分留引用，Agent 可以用工具回读 | T3 Code portable handoff | 计划中（"交给 Agent"带消息上下文时采用） |
+| 30 | 会话生命周期：置顶 / 稍后 / 收起（完成后自动收起，有新动静再回到活跃区） | T3 Code 侧栏 | 参考（收件箱的"已处理 / 稍后"可以对齐这套语义） |
+| 31 | 导入用户在终端里开过的 Claude / Codex 会话，再在自己这里续接 | T3 Code `AgentSessionScanner` | 参考（读 `~/.claude/projects`，不接管进程，和 herdr 那节的结论一致） |
 | 25 | 识别规则与程序分开发版：Agent 的 UI 改版时只更新规则文件；每次判定都能说出命中的规则和证据 | herdr agent-detection | 仅供参考：我们用结构化输出，不读屏；做交互式任务时再用 |
 
 明确**不采纳**的：
 - Persona 只在内存保留 15 分钟的事件日志：我们的数据本来就落库，用游标更可靠。
 - botmux 每个流单独建一条隧道连接。
 - 设备签名配对：在单用户 + Tailscale 访问控制下，收益小于成本。
+- T3 Code 新 thread 默认 Full access：我们坚持默认逐步审批。
+- T3 Code 手机推送依赖它自己的云：我们的推送由 hub 直接发。
 
 ## 5. 中心节点与连接方式
 
@@ -343,6 +383,7 @@
 | HappyClaw | 有：Node 服务本身 | 会话、工作区、用户 | 没有远程机器，只能单机执行 | 全部不可用 |
 | life-agent | 有：hub | 全部 IM 正文、任务、审批 | 设备经 Tailscale 访问；其它机器的 node 主动连 hub，事件写本地 outbox，断线后续传 | 手机端不可用；node 上的任务继续跑，事件留在本地等 hub 恢复 |
 | herdr | 没有；由你面前的客户端把各台机器汇总起来 | 不存；每台机器的 herdr server 各管各的 pane 和 `session.json` | **反过来，客户端经 SSH 主动连进每台机器**，并把桥接进程接到对方 server 的 socket 上。只有选中的机器推送画面，其余只推 Agent 状态和通知 | 没有中心可挂；断掉的机器灰显并自动重连，其它机器不受影响 |
+| T3 Code | 没有；每台机器一个 environment，客户端汇总。T3 Connect 是托管的账号和隧道服务 | 不存业务数据；T3 Connect 只管账号、设备授权、隧道分配和 webhook 转发 | 客户端直连各 environment（LAN、Tailscale、SSH），或走 T3 Connect 托管隧道；environment 之间用 peer link 调对方的 `/mcp` | 没有中心可挂；T3 Connect 挂了只影响远程访问和手机推送 |
 
 规律是：**中心调度、存状态，执行放在各台机器上，并且总是机器主动连中心。** 原因是执行机器（公司电脑、家里的 Mac）都在 NAT 或防火墙后面，中心连不进去。
 
@@ -436,6 +477,7 @@ Persona、Multica、botmux 和我们的 node，都是执行机器主动连中心
   - **重点只跟踪 Persona**：它和我们的方向，即工作收件箱加上生活能力，重合度最高，迭代也最快。
   - **OpenClaw 不再跟踪**：方向已过时，文档里的分析保留作历史参考。
   - botmux、HappyClaw 落后较多时再看。
+  - T3 Code（2026-11-24 加入）：不碰消息和生活数据，只跟踪 Agent 执行侧（provider、审批、MCP、远程），每天约 190 个提交，按月复核即可。
 
 ## 8. 参考资料
 
@@ -444,4 +486,5 @@ Persona、Multica、botmux 和我们的 node，都是执行机器主动连中心
 - botmux：[文档站](https://deepcoldy.github.io/botmux/)；platform 的 [v0.1.0 release](https://github.com/botmux-ai/botmux-platform/releases/tag/v0.1.0)
 - HappyClaw：[README](https://github.com/riba2534/happyclaw)；源码中的 `docs/RUNTIME-ARCHITECTURE.md`、`docs/ACL-MATRIX.md`、`src/wechat.ts`、`src/qq.ts`、`src/feishu.ts`、`container/agent-runner/src/index.ts`
 - herdr：[README](https://github.com/herdrdev/herdr)、[socket API](https://herdr.dev/docs/socket-api/)、`herdr --skill` 输出的 Agent 使用说明；源码中的 `src/agent_resume.rs`、`src/integration/`；本机规则文件 `~/.local/state/herdr/agent-detection/remote/claude.toml`
+- T3 Code：[README](https://github.com/pingdotgg/t3code)；源码中的 `docs/internals/01_architecture.md`、`05_remote.md`、`06_t3-connect.md`，`docs/user/outside-agents.md`、`remote-access.md`、`permission-modes.md`、`workflows.md`、`portable-handoffs.md`、`mobile-notifications.md`，`apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`、`apps/server/src/project/AgentSessionScanner.ts`
 - 微信接入现状：`sjzar/chatlog` 已于 2025-10 收到官方函件后删除代码，详见 [docs/connectors.md](connectors.md)

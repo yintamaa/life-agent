@@ -42,6 +42,13 @@
       "reviewed_commit": "",
       "reviewed_at": "2026-11-18",
       "note": "只看过 README，未做源码分析"
+    },
+    {
+      "name": "t3code",
+      "repo": "https://github.com/pingdotgg/t3code",
+      "reviewed_commit": "c9e22e5ff4",
+      "reviewed_at": "2026-11-24",
+      "note": "编码 Agent 控制面，不涉及消息和生活数据；只看 Agent 执行侧，按月复核"
     }
   ]
 }
