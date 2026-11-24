@@ -206,6 +206,11 @@
   - 近 30 天 763 个作者、约 5,800 个合入的 PR；提交量从 8 月的每月约 700 个涨到 11 月的约 4,700 个。核心维护者一人 30 天提交 2,326 次，其中大量带 `Co-authored-by: Claude`，**主力是"小核心团队 + 大量 AI 写代码 + 社区 PR"**，不是几百人的工程团队。
   - 非测试代码约 130 万行：server 34 万、web 36 万、mobile 20 万、共享包 28 万、托管中继 2 万；测试文件约 6,500 个；14 个 provider 包、11 个代码托管平台包。我们是约 7.8k 行 Go 加 2.9k 行前端。
   - 行数多不等于质量高，但它覆盖的面（原生 App、推送、十几种 Agent 的协议差异、性能回归检查）确实是一个人兼职做不完的。
+- **调度层长什么样，能不能直接拿来用**（2026-11-24 核实）：
+  - 调度全部在单台机器的 server 里，即 `apps/server/src/orchestration-v2/`。非测试代码约 9.5 万行，其中 `Orchestrator.ts` 1.8 万行、`ClaudeAdapterV2.ts` 1.6 万行，用 TypeScript 加 Effect 框架写成。它管的是一台机器上"thread → run → provider 会话"的排队、续接、重启恢复和 checkpoint。**没有跨机器的派发者**：派到哪台机器由人来选，或者由一台机器上的 Agent 通过 peer link 去调另一台的 `/mcp`。
+  - 对应到我们，它相当于 node 内部的运行时管理。我们 hub 做的跨机器汇总、统一审批和团队编排，它都没有对应的部分。
+  - 外部调用者经 MCP **批不了权限请求**：`t3_pending_request` 只能回答 Agent 的提问，工具描述里写明 "cannot approve a permission request"（`apps/server/src/mcp/toolkits/thread/tools.ts`）。
+  - 结论：代码是 MIT 许可，法律上可以抄。但语言和框架都不同，移植等于重写 9.5 万行，之后还要自己跟上它每天的改动。所以只移植设计思路（借鉴清单 #27～#29、#32）；要用整套执行层，就直接调用它，不 fork。
 - **一句话**：**多机、多端的编码 Agent 控制面**。它把我们"Agent 帮你处理"那一半做到了极致，但对"你的生活数据"一无所知。
 
 和我们的关系：
@@ -358,12 +363,13 @@
 | 15 | 粗粒度审批：任务先只读运行，审批通过后才放开写权限 | HappyClaw work item | 计划中（作为"告警诊断"这类自动任务的默认档） |
 | 16 | QQ 被动回复额度（带入站 msg_id、5 分钟内、最多 4 次）与微信 `context_token` 的生命周期处理 | HappyClaw | 仅供参考：我们走 NapCat，不受官方 Bot 额度限制 |
 | 24 | 可选的"交互式"任务：Agent 跑在 herdr 的 pane 里，node 通过 socket API 发 prompt、读状态；手机上看进度，回到电脑前直接 attach 接手 | herdr（Persona 的用法） | 待评估（和现有无头模式并存，不替换） |
-| 26 | 可选的 T3 Code 运行时：node 发现本机装了 `t3`，就用 `t3 thread start` / `send --wait --json` 发起和续接任务（退出码 2 表示等人回答） | T3 Code | 待评估（和无头模式、herdr 交互式并存；审批会落在 T3 界面里） |
+| 26 | 可选的 T3 Code 运行时：node 发现本机装了 `t3`，就用 `t3 thread start` / `send --wait --json` 发起和续接任务（退出码 2 表示等人回答） | T3 Code | 待评估（和无头模式、herdr 交互式并存。审批经 MCP 批不了，只能在 T3 自己的界面里批，或者把 thread 设成 Auto） |
 | 27 | 权限分档：逐步审批 / 自动接受改文件 / 交给 provider 自带的自动审查 / 完全访问；项目可覆盖默认档；外部调用者的权限只能往下收窄 | T3 Code | 计划中（和 #22 常驻授权一起做；我们的默认档仍是逐步审批） |
 | 28 | Codex 走 app-server，补上逐步审批 | T3 Code `effect-codex-app-server` | 计划中（补 design-agents 第 5 节的缺口） |
 | 29 | 交接上下文"按预算挑原文，不让模型写摘要"：保留原始请求和最近的问答，原文、顺序、角色都不变；省略的部分留引用，Agent 可以用工具回读 | T3 Code portable handoff | 计划中（"交给 Agent"带消息上下文时采用） |
 | 30 | 会话生命周期：置顶 / 稍后 / 收起（完成后自动收起，有新动静再回到活跃区） | T3 Code 侧栏 | 参考（收件箱的"已处理 / 稍后"可以对齐这套语义） |
 | 31 | 导入用户在终端里开过的 Claude / Codex 会话，再在自己这里续接 | T3 Code `AgentSessionScanner` | 参考（读 `~/.claude/projects`，不接管进程，和 herdr 那节的结论一致） |
+| 32 | 状态机写法：命令先做不带 I/O 的决策，事件、投影、命令回执和待执行副作用在同一个事务里提交，事务之后再执行副作用、把结果作为命令喂回；适配器只声明真正支持的能力，不靠自动回答审批来模拟缺失的权限模式；完成、停止、出错、进程退出等所有终止路径都要收尾未结束的工具调用和审批 | T3 Code `orchestration-v2`、`docs/internals/03_providers.md` | 计划中（拿来对照检查 hub 的任务状态机和 node 的适配器） |
 | 25 | 识别规则与程序分开发版：Agent 的 UI 改版时只更新规则文件；每次判定都能说出命中的规则和证据 | herdr agent-detection | 仅供参考：我们用结构化输出，不读屏；做交互式任务时再用 |
 
 明确**不采纳**的：
